@@ -1,6 +1,8 @@
 defaults:
   - env_vars: env_vars
-  - encoder: pusht_dynamo
+  # - encoder: pusht_dynamo
+  # - encoder: dino_cls
+  - encoder: dino_patch_avg_pool
   - _self_
 
 seed: 42
@@ -8,11 +10,11 @@ window_size: 5
 goal_window_size: 5
 eval_window_size: 5
 
-batch_size: 512
+batch_size: 16
 epochs: 5000
 eval_freq: 10
 eval_on_env_freq: 100
-num_env_evals: 100
+num_env_evals: 100 # 
 num_final_evals: 100
 num_final_eval_per_goal: 1
 action_window_size: 5
@@ -52,7 +54,7 @@ data:
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
 
-save_every: 10
+save_every: 1
 save_path: "${env_vars.save_path}/checkpoints/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 
 model:
@@ -64,6 +66,7 @@ model:
   vqvae_n_embed: 16
   vqvae_groups: 2
   views: ${env.views}
+  n_patches: 256 # TODO
   vqvae_fit_steps: 44
   vqvae_iters: 1000
   n_layer: 8

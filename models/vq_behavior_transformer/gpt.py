@@ -38,6 +38,7 @@ import math
 from dataclasses import dataclass
 
 import torch
+import einops
 import torch.nn as nn
 from torch.nn import functional as F
 
@@ -57,6 +58,15 @@ def new_gelu(x):
         )
     )
 
+def generate_mask_matrix(npatch, nwindow):
+    zeros = torch.zeros(npatch, npatch)
+    ones = torch.ones(npatch, npatch)
+    rows = []
+    for i in range(nwindow):
+        row = torch.cat([ones] * (i+1) + [zeros] * (nwindow - i-1), dim=1)
+        rows.append(row)
+    mask = torch.cat(rows, dim=0).unsqueeze(0).unsqueeze(0)
+    return mask
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -70,11 +80,14 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
         # causal mask to ensure that attention is only applied to the left in the input sequence
+        # self.register_buffer(
+        #     "bias",
+        #     torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size),
+        # )
+        bias = generate_mask_matrix(config.n_patches, config.block_size)
         self.register_buffer(
             "bias",
-            torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                1, 1, config.block_size, config.block_size
-            ),
+            bias,
         )
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -100,7 +113,7 @@ class CausalSelfAttention(nn.Module):
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf")) # TODO
         att = F.softmax(att, dim=-1)
         att = self.attn_dropout(att)
         y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
@@ -147,6 +160,7 @@ class GPTConfig:
     block_size: int = 1024
     input_dim: int = 256
     output_dim: int = 256
+    n_patches: int = 256
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -164,7 +178,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Linear(config.input_dim, config.n_embd),
-                wpe=nn.Embedding(config.block_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size * config.n_patches, config.n_embd),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=nn.LayerNorm(config.n_embd),
@@ -185,26 +199,23 @@ class GPT(nn.Module):
 
     def forward(self, input, targets=None):
         device = input.device
-        b, t, d = input.size()
+        b, t, p, d = input.size()
         assert (
             t <= self.config.block_size
         ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(
-            0
-        )  # shape (1, t)
-
+        pos = torch.arange(0, t * p, dtype=torch.long, device=device).unsqueeze(0)  # shape (1, t)
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(
-            input
-        )  # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(
-            pos
-        )  # position embeddings of shape (1, t, n_embd)
+        tok_emb = self.transformer.wte(input)  # token embeddings of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
+        pos_emb = einops.rearrange(pos_emb, 'b (t p) d -> b t p d', t=t)
         x = self.transformer.drop(tok_emb + pos_emb)
+        x = einops.rearrange(x, 'b t p d -> b (t p) d')
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
+        logits = einops.rearrange(logits, 'b (t p) d -> b t p d', t=t)
+        logits = logits[:, :, -1]  # take only the first token prediction
         return logits
 
     def _init_weights(self, module):

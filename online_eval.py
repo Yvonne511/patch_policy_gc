@@ -116,11 +116,14 @@ def main(cfg):
         epoch=None,
     ):
         def embed(enc, obs):
+            # import pdb; pdb.set_trace()
             obs = (
                 torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0).to(cfg.device)
             )  # 1 V C H W
             result = enc(obs)
-            result = einops.rearrange(result, "1 V E -> (V E)")
+            # import pdb; pdb.set_trace()
+            # result = einops.rearrange(result, "1 V E -> (V E)")
+            result = einops.rearrange(result, "1 V E -> V E") # don't flatten patch dim
             return result
 
         avg_reward = 0
@@ -135,6 +138,7 @@ def main(cfg):
             for i in range(num_eval_per_goal):
                 obs_stack = deque(maxlen=cfg.eval_window_size)
                 this_obs = env.reset(goal_idx=goal_idx)  # V C H W
+                print(goal_idx, i)
                 assert (
                     this_obs.min() >= 0 and this_obs.max() <= 1
                 ), "expect 0-1 range observation"
@@ -236,8 +240,8 @@ def main(cfg):
                 for data in test_loader:
                     obs, act, goal = (x.to(cfg.device) for x in data)
                     assert obs.ndim == 4, "expect N T V E here"
-                    obs = einops.rearrange(obs, "N T V E -> N T (V E)")
-                    goal = einops.rearrange(goal, "N T V E -> N T (V E)")
+                    # obs = einops.rearrange(obs, "N T V E -> N T (V E)") # keep the patch dim
+                    # goal = einops.rearrange(goal, "N T V E -> N T (V E)")
                     predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
                     total_loss += loss.item()
                     wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
@@ -257,8 +261,9 @@ def main(cfg):
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
             obs, act, goal = (x.to(cfg.device) for x in data)
-            obs = einops.rearrange(obs, "N T V E -> N T (V E)")
-            goal = einops.rearrange(goal, "N T V E -> N T (V E)")
+            # import pdb; pdb.set_trace()
+            # obs = einops.rearrange(obs, "N T V E -> N T (V E)")
+            # goal = einops.rearrange(goal, "N T V E -> N T (V E)")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
             wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
             loss.backward()

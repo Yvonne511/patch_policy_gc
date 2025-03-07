@@ -68,6 +68,7 @@ class BehaviorTransformer(nn.Module):
         vqvae_groups: int,
         vqvae_fit_steps: int,
         vqvae_iters: int,
+        n_patches: int,
         n_layer: int,
         n_head: int,
         n_embd: int,
@@ -95,7 +96,8 @@ class BehaviorTransformer(nn.Module):
 
         self._gpt_model = GPT(
             GPTConfig(
-                block_size=obs_window_size + act_window_size,
+                block_size=obs_window_size + act_window_size, # TODO: Q: why? isn't obs_window_size enough?
+                n_patches=n_patches,
                 n_layer=n_layer,
                 n_head=n_head,
                 n_embd=n_embd,
@@ -111,11 +113,11 @@ class BehaviorTransformer(nn.Module):
         self.vqvae_is_fit = False
         self._vqvae_model = VqVae(
             input_dim_h=act_window_size,
-            input_dim_w=act_dim,
-            n_latent_dims=vqvae_latent_dim,
-            vqvae_n_embed=vqvae_n_embed,
-            vqvae_groups=vqvae_groups,
-            encoder_loss_multiplier=vqvae_encoder_loss_multiplier,
+            input_dim_w=act_dim, 
+            n_latent_dims=vqvae_latent_dim, # dim of input after encoder
+            vqvae_n_embed=vqvae_n_embed, # num of codes in the codebook
+            vqvae_groups=vqvae_groups, # num of codebooks
+            encoder_loss_multiplier=vqvae_encoder_loss_multiplier, 
             act_scale=act_scale,
         )
         self._vqvae_optim = torch.optim.Adam(
@@ -221,6 +223,7 @@ class BehaviorTransformer(nn.Module):
         else:
             raise NotImplementedError
 
+        # import pdb; pdb.set_trace()
         gpt_output = self._gpt_model(gpt_input)  # N, T, n_embd
 
         if self._cbet_method == "concat":
@@ -243,6 +246,7 @@ class BehaviorTransformer(nn.Module):
             )
         else:
             loss, loss_dict = None, {}
+        # import pdb; pdb.set_trace()
         return predicted_action, loss, loss_dict
 
     def _calc_loss(
@@ -290,8 +294,9 @@ class BehaviorTransformer(nn.Module):
         return loss, loss_dict
 
     def _forward_heads(self, gpt_output):
-        cbet_logits = self._map_to_cbet_preds_bin(gpt_output)
-        cbet_logits = einops.rearrange(cbet_logits, "N T (G C) -> N T G C", G=self._G)
+        # import pdb; pdb.set_trace()
+        cbet_logits = self._map_to_cbet_preds_bin(gpt_output) # N, T, n_embed --> N, T, G*C
+        cbet_logits = einops.rearrange(cbet_logits, "N T (G C) -> N T G C", G=self._G) # N, T, G, C
         cbet_offsets = self._map_to_cbet_preds_offset(gpt_output)
         cbet_offsets = einops.rearrange(
             cbet_offsets,
@@ -301,28 +306,30 @@ class BehaviorTransformer(nn.Module):
             W=self._act_window_size,
             A=self._act_dim,
         )
-        return cbet_logits, cbet_offsets
+        return cbet_logits, cbet_offsets # (N, T, G, C), (N, T, G, C, W, A)
 
     def _sample_action(self, cbet_logits, cbet_offsets):
         # W = action_window
         # flatten for downstream VQ decoding
-        cbet_probs = torch.softmax(cbet_logits, dim=-1)
+        cbet_probs = torch.softmax(cbet_logits, dim=-1) # (N, T, G, C)
         sampled_centers = einops.rearrange(
             torch.multinomial(cbet_probs.view(-1, self._C), num_samples=1),
             "(N T G) 1 -> N T G",
             N=cbet_probs.shape[0],
             T=cbet_probs.shape[1],
             G=self._G,
-        )
-        centers = self._vqvae_model.draw_code_forward(sampled_centers).clone().detach()
+        ) # (N, T, G), values all in [0, self._C)
+        centers = self._vqvae_model.draw_code_forward(sampled_centers).clone().detach() # N, T, l(512)
+        # import pdb; pdb.set_trace()
         decoded_action = (
             self._vqvae_model.get_action_from_latent(centers).clone().detach()
         )  # N T W A
 
-        sampled_offsets = batch_idx(cbet_offsets, sampled_centers)  # N T G W A
+        sampled_offsets = batch_idx(cbet_offsets, sampled_centers)  # N T G C W A --> N T G W A
         # offset on each residual VQ group; sum on group dim
         sampled_offsets = sampled_offsets.sum(dim=2)
         predicted_action = decoded_action + sampled_offsets
+        # import pdb; pdb.set_trace()
         return predicted_action, decoded_action, sampled_centers, sampled_offsets
 
     def configure_optimizers(self, weight_decay, learning_rate, betas):
