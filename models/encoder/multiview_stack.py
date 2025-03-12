@@ -22,7 +22,9 @@ class MultiviewStack(nn.Module):
 
     def forward(self, x):
         orig_shape = x.shape  # NTVCHW or TVCHW
-        x = einops.rearrange(x, "... V C H W -> (...) V C H W")
+        # import pdb; pdb.set_trace() # N T C H W
+        # x = einops.rearrange(x, "... V C H W -> (...) V C H W")
+        x = einops.rearrange(x, "... C H W -> (...) 1 C H W") # assume dset has only 1 view for now
         outputs = []
         for i, encoder in enumerate(self.encoders):
             this_view = x[:, i]
@@ -30,4 +32,6 @@ class MultiviewStack(nn.Module):
             outputs.append(encoder(this_view))
         out = torch.stack(outputs, dim=-1)
         out = out.reshape(*orig_shape[:-3], -1)
+        out = out.unsqueeze(1) # dummy patch dim
+        # import pdb; pdb.set_trace()
         return out
