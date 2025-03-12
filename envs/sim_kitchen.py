@@ -205,7 +205,8 @@ class KitchenWrapper(gym.Wrapper):
 
     def preprocess_img(self, img):
         img_tensor = torch.from_numpy(np.array(img))
-        img_tensor = einops.rearrange(img_tensor, "H W C -> 1 C H W")
+        # img_tensor = einops.rearrange(img_tensor, "H W C -> 1 C H W")
+        img_tensor = einops.rearrange(img_tensor, "H W C -> C H W") # reverted 
         return img_tensor / 255.0
 
 

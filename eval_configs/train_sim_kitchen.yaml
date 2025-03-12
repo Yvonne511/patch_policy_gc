@@ -63,6 +63,7 @@ model:
   act_dim: ${env.act_dim}
   goal_dim: ${env.goal_dim}
   views: ${env.views}
+  n_patches: 256 # TODO
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2

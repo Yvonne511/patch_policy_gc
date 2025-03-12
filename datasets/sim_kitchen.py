@@ -42,6 +42,8 @@ class SimKitchenTrajectoryDataset(TrajectoryDataset):
         else:
             obs = torch.load(self.data_directory / "obses" / f"{idx:03d}.pth")[frames]
         obs = obs / 255.0
+        # import pdb; pdb.set_trace()
+        obs = obs.squeeze(1)
         act = self.actions[idx, frames]
         mask = torch.ones((len(frames)))
         if self.onehot_goals:
