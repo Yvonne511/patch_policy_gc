@@ -347,13 +347,37 @@ class BehaviorTransformer(nn.Module):
             betas=betas,
         )
         optim = GroupedOptimizer([optimizer1, optimizer2])
+        self.optim = optim
         return optim
+
+    # def load_model(self, path: Path):
+    #     if (path / "cbet_model.pt").exists():
+    #         self.load_state_dict(torch.load(path / "cbet_model.pt"))
+    #     else:
+    #         logging.warning("No model found at %s", path)
 
     def load_model(self, path: Path):
         if (path / "cbet_model.pt").exists():
-            self.load_state_dict(torch.load(path / "cbet_model.pt"))
+            state_dict = torch.load(path / "cbet_model.pt")
+            state_dict = fix_keys(state_dict)
+            self.load_state_dict(state_dict)
+            self.optim.load_state_dict(torch.load(path / "optimizer.pt"))
+            self._gpt_model.load_state_dict(torch.load(path / "gpt_model.pt"))
+            if (path / "resnet.pt").exists():
+                self.resnet.load_state_dict(torch.load(path / "resnet.pt"))
         else:
             logging.warning("No model found at %s", path)
+
+        print(f"### Loading model from {path}")
+
+    def save_model(self, path: Path):
+        torch.save(self.state_dict(), path / "cbet_model.pt")
+        torch.save(self._gpt_model.state_dict(), path / "gpt_model.pt")
+        if hasattr(self, "resnet"):
+            torch.save(self.resnet.state_dict(), path / "resnet.pt")
+            torch.save(self._resnet_header.state_dict(), path / "resnet_header.pt")
+        torch.save(self.optim.state_dict(), path / "optimizer.pt")
+        print(f"### Saving model to {path}")
 
 
 class FocalLoss(nn.Module):
@@ -376,3 +400,19 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
+
+
+def fix_keys(state_dict):
+    key_fixer = {
+        "vq_embeddinglayers": "vq_layer.layers",
+        "encoderencoder": "encoder.encoder",
+        "decoderencoder": "decoder.encoder",
+        "encoderfc": "encoder.fc",
+        "decoderfc": "decoder.fc",
+    }
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        for match, replace in key_fixer.items():
+            k = k.replace(match, replace)
+        new_state_dict[k] = v
+    return new_state_dict

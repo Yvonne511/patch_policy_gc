@@ -36,6 +36,38 @@ def main(cfg):
     encoder = hydra.utils.instantiate(cfg.encoder)
     encoder = encoder.to(cfg.device).eval()
 
+    for param in encoder.parameters():
+        param.requires_grad = False
+    encoder.eval()
+
+    cbet_model = hydra.utils.instantiate(cfg.model).to(cfg.device)
+    if cfg.load_path: # TODO
+        optimizer = cbet_model.configure_optimizers(
+            weight_decay=cfg.optim.weight_decay,
+            learning_rate=cfg.optim.lr,
+            betas=cfg.optim.betas,
+        ) # init optimizer attribute
+        cbet_model.load_model(Path(cfg.load_path))
+        optimizer = cbet_model.optim
+    else:
+        optimizer = cbet_model.configure_optimizers(
+            weight_decay=cfg.optim.weight_decay,
+            learning_rate=cfg.optim.lr,
+            betas=cfg.optim.betas,
+        )
+
+    run = wandb.init(
+        project=cfg.wandb.project,
+        entity=cfg.wandb.entity,
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+    run_name = run.name or "Offline"
+    save_path = Path(cfg.save_path) / run_name
+    save_path.mkdir(parents=True, exist_ok=False)
+    print("Saving to {}".format(save_path))
+    video = VideoRecorder(dir_name=save_path)
+
+    # init datasets
     dataset = hydra.utils.instantiate(cfg.dataset)
     train_data, test_data = split_traj_datasets(
         dataset,
@@ -44,10 +76,10 @@ def main(cfg):
     )
     use_libero_goal = cfg.data.get("use_libero_goal", False)
     train_data = TrajectoryEmbeddingDataset(
-        encoder, train_data, device=cfg.device, embed_goal=use_libero_goal
+        encoder, train_data, device='cpu', embed_goal=use_libero_goal
     )
     test_data = TrajectoryEmbeddingDataset(
-        encoder, test_data, device=cfg.device, embed_goal=use_libero_goal
+        encoder, test_data, device='cpu', embed_goal=use_libero_goal
     )
     traj_slicer_kwargs = {
         "window": cfg.data.window_size,
@@ -66,16 +98,7 @@ def main(cfg):
     test_loader = torch.utils.data.DataLoader(
         test_data, batch_size=cfg.batch_size, shuffle=False, pin_memory=False
     )
-    for param in encoder.parameters():
-        param.requires_grad = False
-    encoder.eval()
 
-    cbet_model = hydra.utils.instantiate(cfg.model).to(cfg.device)
-    optimizer = cbet_model.configure_optimizers(
-        weight_decay=cfg.optim.weight_decay,
-        learning_rate=cfg.optim.lr,
-        betas=cfg.optim.betas,
-    )
     env = hydra.utils.instantiate(cfg.env.gym)
     if "use_libero_goal" in cfg.data:
         with torch.no_grad():
@@ -97,15 +120,6 @@ def main(cfg):
         def goal_fn(goal_idx):
             return empty_tensor
 
-    run = wandb.init(
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
-    run_name = run.name or "Offline"
-    save_path = Path(cfg.save_path) / run_name
-    save_path.mkdir(parents=True, exist_ok=False)
-    video = VideoRecorder(dir_name=save_path)
 
     @torch.no_grad()
     def eval_on_env(
@@ -200,6 +214,9 @@ def main(cfg):
 
     metrics_history = []
     reward_history = []
+
+    cbet_model.save_model(save_path)
+
     for epoch in tqdm.trange(cfg.epochs):
         cbet_model.eval()
         if epoch % cfg.eval_on_env_freq == 0:
@@ -261,13 +278,16 @@ def main(cfg):
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
             obs, act, goal = (x.to(cfg.device) for x in data)
-            # import pdb; pdb.set_trace()
             # obs = einops.rearrange(obs, "N T V E -> N T (V E)")
             # goal = einops.rearrange(goal, "N T V E -> N T (V E)")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
             wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
             loss.backward()
             optimizer.step()
+        
+        # save model
+        if epoch % cfg.save_every == 0:
+            cbet_model.save_model(save_path)
 
     avg_reward, completion_id_list, max_coverage, final_coverage = eval_on_env(
         cfg,
