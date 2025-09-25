@@ -174,7 +174,6 @@ def main(cfg):
                     action = action[0]  # remove batch dim; always 1
 
                     if use_diffusion: # DP inference
-                        action = action[0]
                         for i in range(len(action)):
                             exec_action = action[i].cpu().detach().numpy()
                             obs, reward, done, info = env.step(exec_action)

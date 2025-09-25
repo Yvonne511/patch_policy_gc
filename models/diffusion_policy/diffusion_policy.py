@@ -823,7 +823,7 @@ class DiffusionPolicy(nn.Module):
     def unnormalize_data(self, data):
         return self.normalizer.unnormalize(data)
 
-    def _predict (
+    def _predict(
         self,
         obs_seq: torch.Tensor,
         goal_seq: Optional[torch.Tensor],
