@@ -32,6 +32,7 @@ import numpy as np
 from scipy.spatial import transform
 import pybullet
 import pybullet_utils.bullet_client as bullet_client
+from typing import Optional
 
 import torch
 
@@ -566,7 +567,14 @@ class BlockPushMultimodal(block_pushing.BlockPush):
 
 
 class BlockPushMultimodalMultiview(BlockPushMultimodal):
-    def __init__(self, id=None, *args, **kwargs):
+    def __init__(
+            self,
+            id=None,
+            view_idx: Optional[int] = None,
+            *args, **kwargs
+                ):
+        self.view_idx = view_idx
+        print("view idx:", self.view_idx)
         super().__init__(*args, **kwargs)
         self.observation_space = spaces.Box(
             low=0, high=1, shape=(2, 3, self._image_size[0], self._image_size[1])
@@ -588,7 +596,11 @@ class BlockPushMultimodalMultiview(BlockPushMultimodal):
         reward = self._get_reward(state)
         # Terminate the episode if both blocks are close enough to the targets.
         obs = self._get_obs()
+        if self.view_idx is not None:
+            image = np.expand_dims(obs[self.view_idx], axis=0)  # 1 C H W
         image = einops.rearrange(obs, "V C H W -> H (V W) C")
+        if self.view_idx is not None:
+            obs = obs[self.view_idx] # C H W
         obs = obs / 255.0
         self._step += 1
         done = (reward >= 0.5) or (self._step >= 300)
@@ -607,11 +619,13 @@ class BlockPushMultimodalMultiview(BlockPushMultimodal):
         )
 
     def reset(self, reset_poses=True, *args, **kwargs):
-        print("resetting env")
         self._step = 0
         state = super().reset(reset_poses=reset_poses)
         obs = self._get_obs()
         obs = obs / 255.0
+
+        if self.view_idx is not None:
+            obs = obs[self.view_idx]
         return obs
 
     def set_state(self, state: collections.OrderedDict):
