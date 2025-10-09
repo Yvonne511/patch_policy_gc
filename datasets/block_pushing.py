@@ -77,10 +77,6 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
         output = self.get_frames(idx, range(T))
         if self.view_idx is not None:
             output = (output[0][:, self.view_idx], output[1], output[2])
-        # print("output shapes:")
-        # print(output[0].shape)
-        # print(output[1].shape)
-        # print(output[2].shape)
         return output
 
     def __len__(self):

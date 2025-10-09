@@ -57,9 +57,6 @@ class PushTDataset(TrajectoryDataset):
         return torch.cat(result, dim=0)
 
     def get_frames(self, idx, frames):
-        # vid_dir = self.data_directory / "obses"
-        # obs = torch.load(str(vid_dir / f"episode_{idx:03d}.pth"))
-        # obs = obs[frames]  # THWC
         if self.prefetch:
             obs = self.obses[idx][frames]
         else:
