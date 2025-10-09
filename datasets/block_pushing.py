@@ -13,13 +13,14 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
         data_directory: os.PathLike,
         onehot_goals=False,
         subset_fraction: Optional[float] = None,
-        prefetch: bool = False,
+        prefetch: bool = True,
+        view_idx: Optional[int] = None,
     ):
         self.data_directory = Path(data_directory)
         self.states = np.load(self.data_directory / "multimodal_push_observations.npy")
         self.actions = np.load(self.data_directory / "multimodal_push_actions.npy")
         self.masks = np.load(self.data_directory / "multimodal_push_masks.npy")
-
+        self.view_idx = view_idx
         self.subset_fraction = subset_fraction
         if self.subset_fraction:
             assert self.subset_fraction > 0 and self.subset_fraction <= 1
@@ -73,7 +74,10 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
 
     def __getitem__(self, idx):
         T = self.masks[idx].sum().int().item()
-        return self.get_frames(idx, range(T))
+        output = self.get_frames(idx, range(T))
+        if self.view_idx is not None:
+            output = (output[0][:, self.view_idx], output[1], output[2])
+        return output
 
     def __len__(self):
         return len(self.states)

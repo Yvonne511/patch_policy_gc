@@ -12,6 +12,7 @@ class PushTDataset(TrajectoryDataset):
         data_directory,
         subset_fraction: Optional[float] = None,
         relative=False,
+        prefetch: bool = True,
     ):
         self.data_directory = Path(data_directory)
         self.relative = relative
@@ -37,6 +38,14 @@ class PushTDataset(TrajectoryDataset):
             T = self.seq_lengths[i]
             self.actions[i, T:] = 0  # redo zero padding
 
+        self.prefetch = prefetch
+        if self.prefetch:
+            self.obses = []
+            for i in range(n):
+                vid_dir = self.data_directory / "obses"
+                obs = torch.load(str(vid_dir / f"episode_{i:03d}.pth"))
+                self.obses.append(obs)  # THWC
+
     def get_seq_length(self, idx):
         return self.seq_lengths[idx]
 
@@ -48,9 +57,12 @@ class PushTDataset(TrajectoryDataset):
         return torch.cat(result, dim=0)
 
     def get_frames(self, idx, frames):
-        vid_dir = self.data_directory / "obses"
-        obs = torch.load(str(vid_dir / f"episode_{idx:03d}.pth"))
-        obs = obs[frames]  # THWC
+        if self.prefetch:
+            obs = self.obses[idx][frames]
+        else:
+            vid_dir = self.data_directory / "obses"
+            obs = torch.load(str(vid_dir / f"episode_{idx:03d}.pth"))
+            obs = obs[frames]
         obs = einops.rearrange(obs, "T H W C -> T C H W") / 255.0  # T V C H W, 1 view (reverted)
         act = self.actions[idx, frames]
         mask = torch.ones(len(act)).bool()
