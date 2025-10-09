@@ -597,10 +597,9 @@ class BlockPushMultimodalMultiview(BlockPushMultimodal):
         # Terminate the episode if both blocks are close enough to the targets.
         obs = self._get_obs()
         if self.view_idx is not None:
-            image = np.expand_dims(obs[self.view_idx], axis=0)  # 1 C H W
-        image = einops.rearrange(obs, "V C H W -> H (V W) C")
-        if self.view_idx is not None:
-            obs = obs[self.view_idx] # C H W
+            obs = obs[self.view_idx]
+            image = np.expand_dims(obs, axis=0)  # 1 C H W
+        image = einops.rearrange(image, "1 C H W -> H (1 W) C")
         obs = obs / 255.0
         self._step += 1
         done = (reward >= 0.5) or (self._step >= 300)
