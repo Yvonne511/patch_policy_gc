@@ -37,4 +37,6 @@ class resnet18(nn.Module):
             out = out.squeeze(0)
         elif dims > 4:
             out = out.reshape(*orig_shape[:-3], -1)
+        # add a patch dim
+        out = out.unsqueeze(1)
         return out

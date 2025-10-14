@@ -2,7 +2,8 @@ defaults:
   - env_vars: env_vars
   # - encoder: pusht_dynamo
   # - encoder: dino_cls
-  - encoder: dino_patch # dino_patch_avg_pool
+  # - encoder: dino_patch # dino_patch_avg_pool
+  - encoder: resnet18_random
   - _self_
   - override hydra/launcher: submitit_slurm
   
