@@ -27,6 +27,7 @@ class LiberoGoalDataset(TrajectoryDataset):
         for task_name in self.task_names:
             self.demos += list(task_name.iterdir())
 
+        # subset_fraction = 0.1
         self.subset_fraction = subset_fraction
         if self.subset_fraction:
             assert 0 < self.subset_fraction <= 1
@@ -78,6 +79,8 @@ class LiberoGoalDataset(TrajectoryDataset):
         self.goals = None
         goals = []
         for i in range(0, 500, 50):
+        # import pdb; pdb.set_trace() 
+        # for i in range(0, 10):
             last_obs, _, _ = self.get_frames(i, [-1])  # 1 V C H W
             goals.append(last_obs)
         self.goals = goals
@@ -95,13 +98,17 @@ class LiberoGoalDataset(TrajectoryDataset):
         )
         agentview = agentview_obs[frames]
         robotview = robotview_obs[frames]
-        obs = torch.stack([agentview, robotview], dim=1)
-        obs = einops.rearrange(obs, "T V H W C -> T V C H W") / 255.0
+        # TODO: can concat along h or w
+        # obs = torch.stack([agentview, robotview], dim=1)
+        # obs = einops.rearrange(obs, "T V H W C -> T V C H W") / 255.0
+        obs = agentview
+        obs = einops.rearrange(obs, "T H W C -> T C H W") / 255.0
         act = self.actions[idx][frames]
 
         if self.goals is not None:
             task_idx = idx // 50
-            goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1, 1)
+            # goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1, 1)
+            goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1) # delete view dim
             return obs, act, goal
         else:
             return obs, act, None

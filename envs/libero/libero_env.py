@@ -99,7 +99,8 @@ class LiberoEnv(gym.Env):
         obs = self._get_img_obs(obs)
         reward, info["task_rewards"] = self.get_rewards()
         info["finished_tasks"] = self.finished_tasks.copy()
-        info["image"] = einops.rearrange(obs, "V C H W -> H (V W) C")
+        # info["image"] = einops.rearrange(obs, "V C H W -> H (V W) C")
+        info["image"] = einops.rearrange(obs, "C H W -> H W C") # !
         info["all_completions_ids"] = []
 
         cur_task = self.task_names[self.goal_idx]
@@ -117,14 +118,18 @@ class LiberoEnv(gym.Env):
         return np.concatenate((obs[0], obs[1]), axis=1).astype(np.uint8)
 
     def _get_img_obs(self, obs, flip=True, channel_first=True):
+        # TODO: change this, can concat along h or w
         if flip:
             obs["agentview_image"] = obs["agentview_image"][::-1]
             obs["robot0_eye_in_hand_image"] = obs["robot0_eye_in_hand_image"][::-1]
-        obs = np.stack(
-            [obs["agentview_image"], obs["robot0_eye_in_hand_image"]], axis=0
-        )
+        # obs = np.stack(
+        #     [obs["agentview_image"], obs["robot0_eye_in_hand_image"]], axis=0
+        # )
+        # if channel_first:
+        #     obs = einops.rearrange(obs, "V H W C -> V C H W")
+        obs = obs["agentview_image"]
         if channel_first:
-            obs = einops.rearrange(obs, "V H W C -> V C H W")
+            obs = einops.rearrange(obs, "H W C -> C H W")
         return obs
 
     def _get_task_bddl_file(self, task_name):
