@@ -2,7 +2,7 @@ defaults:
   - env_vars: env_vars
   # - encoder: pusht_dynamo
   # - encoder: dino_cls
-  - encoder: dino_patch_avg_pool
+  - encoder: dino_patch # dino_patch_avg_pool
   - _self_
 
 seed: 42
@@ -56,6 +56,7 @@ data:
 
 save_every: 1
 save_path: "${env_vars.save_path}/checkpoints/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+load_path: null
 
 model:
   _target_: models.vq_behavior_transformer.bet.BehaviorTransformer
