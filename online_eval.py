@@ -109,7 +109,7 @@ def main(cfg):
                 last_obs, _, _ = dataset.get_frames(idx, [-1])  # 1 V C H W
                 last_obs = last_obs.to(cfg.device)
                 embd = encoder(last_obs)[0]  # V E
-                embd = einops.rearrange(embd, "V E -> (V E)")
+                # embd = einops.rearrange(embd, "V E -> (V E)") # don't flatten patch dim
                 goals_cache.append(embd)
 
         def goal_fn(goal_idx):
@@ -164,7 +164,7 @@ def main(cfg):
                     obs = torch.stack(tuple(obs_stack)).float().to(cfg.device)
                     goal = torch.as_tensor(goal, dtype=torch.float32, device=cfg.device)
                     # goal = embed(encoder, goal)
-                    goal = goal.unsqueeze(0).repeat(cfg.eval_window_size, 1)
+                    goal = einops.repeat(goal, '... -> t ...', t=cfg.eval_window_size)
                     action, _, _ = cbet_model(obs.unsqueeze(0), goal.unsqueeze(0), None)
                     action = action[0]  # remove batch dim; always 1
                     if cfg.action_window_size > 1:
