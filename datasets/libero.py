@@ -27,12 +27,12 @@ class LiberoGoalDataset(TrajectoryDataset):
         for task_name in self.task_names:
             self.demos += list(task_name.iterdir())
 
-        # subset_fraction = 0.1
         self.subset_fraction = subset_fraction
         if self.subset_fraction:
             assert 0 < self.subset_fraction <= 1
             n = int(len(self.demos) * self.subset_fraction)
             self.demos = self.demos[:n]
+        print(f"######### LiberoGoalDataset: loaded {len(self.demos)} demos")
 
         # prefetch all npy data
         self.joint_pos = []
@@ -78,9 +78,7 @@ class LiberoGoalDataset(TrajectoryDataset):
         # last frame goal
         self.goals = None
         goals = []
-        for i in range(0, 500, 50):
-        # import pdb; pdb.set_trace() 
-        # for i in range(0, 10):
+        for i in range(0, len(self.demos), 50):
             last_obs, _, _ = self.get_frames(i, [-1])  # 1 V C H W
             goals.append(last_obs)
         self.goals = goals
@@ -101,6 +99,8 @@ class LiberoGoalDataset(TrajectoryDataset):
         # TODO: can concat along h or w
         # obs = torch.stack([agentview, robotview], dim=1)
         # obs = einops.rearrange(obs, "T V H W C -> T V C H W") / 255.0
+
+        # ! assume using only agentview for now
         obs = agentview
         obs = einops.rearrange(obs, "T H W C -> T C H W") / 255.0
         act = self.actions[idx][frames]
