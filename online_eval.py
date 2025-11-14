@@ -16,6 +16,8 @@ import pickle
 from datasets.core import TrajectoryEmbeddingDataset, split_traj_datasets
 from datasets.vqbet_repro import TrajectorySlicerDataset
 
+from utils.normalizer import LinearNormalizer
+
 
 if "MUJOCO_GL" not in os.environ:
     os.environ["MUJOCO_GL"] = "egl"
@@ -33,28 +35,7 @@ def main(cfg):
     print(OmegaConf.to_yaml(cfg))
     seed_everything(cfg.seed)
 
-    encoder = hydra.utils.instantiate(cfg.encoder)
-    encoder = encoder.to(cfg.device).eval()
-
-    for param in encoder.parameters():
-        param.requires_grad = False
-    encoder.eval()
-
-    cbet_model = hydra.utils.instantiate(cfg.model).to(cfg.device)
-    if cfg.load_path: # TODO
-        optimizer = cbet_model.configure_optimizers(
-            weight_decay=cfg.optim.weight_decay,
-            learning_rate=cfg.optim.lr,
-            betas=cfg.optim.betas,
-        ) # init optimizer attribute
-        cbet_model.load_model(Path(cfg.load_path))
-        optimizer = cbet_model.optim
-    else:
-        optimizer = cbet_model.configure_optimizers(
-            weight_decay=cfg.optim.weight_decay,
-            learning_rate=cfg.optim.lr,
-            betas=cfg.optim.betas,
-        )
+    use_diffusion = "diffusion" in cfg.model['_target_']
 
     run = wandb.init(
         project=cfg.wandb.project,
@@ -69,6 +50,30 @@ def main(cfg):
 
     # init datasets
     dataset = hydra.utils.instantiate(cfg.dataset)
+    encoder = hydra.utils.instantiate(cfg.encoder)
+    encoder = encoder.to(cfg.device).eval()
+
+    for param in encoder.parameters():
+        param.requires_grad = False
+    encoder.eval()
+
+    cbet_model = hydra.utils.instantiate(cfg.model).to(cfg.device)
+    optimizer = cbet_model.configure_optimizers(
+        weight_decay=cfg.optim.weight_decay,
+        learning_rate=cfg.optim.lr,
+        betas=cfg.optim.betas,
+    ) # init optimizer attribute
+
+    if use_diffusion:
+        actions = dataset.get_all_actions()
+        action_normalizer = LinearNormalizer()
+        action_normalizer.fit(actions)
+        cbet_model.set_normalizer(action_normalizer)
+
+    if cfg.load_path: # TODO: not checked for diffusion 
+        cbet_model.load_model(Path(cfg.load_path))
+        optimizer = cbet_model.optim
+
     train_data, test_data = split_traj_datasets(
         dataset,
         train_fraction=cfg.train_fraction,
@@ -76,10 +81,10 @@ def main(cfg):
     )
     use_libero_goal = cfg.data.get("use_libero_goal", False)
     train_data = TrajectoryEmbeddingDataset(
-        encoder, train_data, device='cpu', embed_goal=use_libero_goal
+        encoder, train_data, device=cfg.device, embed_goal=use_libero_goal
     )
     test_data = TrajectoryEmbeddingDataset(
-        encoder, test_data, device='cpu', embed_goal=use_libero_goal
+        encoder, test_data, device=cfg.device, embed_goal=use_libero_goal
     )
     traj_slicer_kwargs = {
         "window": cfg.data.window_size,
@@ -167,33 +172,46 @@ def main(cfg):
                     goal = goal.unsqueeze(0).repeat(cfg.eval_window_size, 1)
                     action, _, _ = cbet_model(obs.unsqueeze(0), goal.unsqueeze(0), None)
                     action = action[0]  # remove batch dim; always 1
-                    if cfg.action_window_size > 1:
-                        action_list.append(action[-1].cpu().detach().numpy())
-                        if len(action_list) > cfg.action_window_size:
-                            action_list = action_list[1:]
-                        curr_action = np.array(action_list)
-                        curr_action = (
-                            np.sum(curr_action, axis=0)[0] / curr_action.shape[0]
-                        )
-                        new_action_list = []
-                        for a_chunk in action_list:
-                            new_action_list.append(
-                                np.concatenate(
-                                    (a_chunk[1:], np.zeros((1, a_chunk.shape[1])))
-                                )
+
+                    if use_diffusion: # DP inference
+                        for i in range(len(action)):
+                            exec_action = action[i].cpu().detach().numpy()
+                            obs, reward, done, info = env.step(exec_action)
+                            obs_stack.append(embed(encoder, obs))
+                            total_reward += reward
+                            if videorecorder.enabled:
+                                videorecorder.record(info["image"])
+                            step += 1
+                            if done:
+                                break
+                    else: # vqbet inference
+                        if cfg.action_window_size > 1:
+                            action_list.append(action[-1].cpu().detach().numpy())
+                            if len(action_list) > cfg.action_window_size:
+                                action_list = action_list[1:]
+                            curr_action = np.array(action_list)
+                            curr_action = (
+                                np.sum(curr_action, axis=0)[0] / curr_action.shape[0]
                             )
-                        action_list = new_action_list
-                    else:
-                        curr_action = action[-1, 0, :].cpu().detach().numpy()
+                            new_action_list = []
+                            for a_chunk in action_list:
+                                new_action_list.append(
+                                    np.concatenate(
+                                        (a_chunk[1:], np.zeros((1, a_chunk.shape[1])))
+                                    )
+                                )
+                            action_list = new_action_list
+                        else:
+                            curr_action = action[-1, 0, :].cpu().detach().numpy()
 
-                    this_obs, reward, done, info = env.step(curr_action)
-                    this_obs_enc = embed(encoder, this_obs)
-                    obs_stack.append(this_obs_enc)
+                        this_obs, reward, done, info = env.step(curr_action)
+                        this_obs_enc = embed(encoder, this_obs)
+                        obs_stack.append(this_obs_enc)
 
-                    if videorecorder.enabled:
-                        videorecorder.record(info["image"])
-                    step += 1
-                    total_reward += reward
+                        if videorecorder.enabled:
+                            videorecorder.record(info["image"])
+                        step += 1
+                        total_reward += reward
                     goal = goal_fn(goal_idx)
                 avg_reward += total_reward
                 if cfg.env.gym.id == "pusht":
@@ -215,7 +233,8 @@ def main(cfg):
     metrics_history = []
     reward_history = []
 
-    cbet_model.save_model(save_path)
+    # cbet_model.save_model(save_path)
+    torch.save(cbet_model, "{}/model_{}.pt".format(save_path, "init"))
 
     for epoch in tqdm.trange(cfg.epochs):
         cbet_model.eval()
@@ -262,17 +281,19 @@ def main(cfg):
                     predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
                     total_loss += loss.item()
                     wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
-                    action_diff += loss_dict["action_diff"]
-                    action_diff_tot += loss_dict["action_diff_tot"]
-                    action_diff_mean_res1 += loss_dict["action_diff_mean_res1"]
-                    action_diff_mean_res2 += loss_dict["action_diff_mean_res2"]
-                    action_diff_max += loss_dict["action_diff_max"]
+                    if not use_diffusion:
+                        action_diff += loss_dict["action_diff"]
+                        action_diff_tot += loss_dict["action_diff_tot"]
+                        action_diff_mean_res1 += loss_dict["action_diff_mean_res1"]
+                        action_diff_mean_res2 += loss_dict["action_diff_mean_res2"]
+                        action_diff_max += loss_dict["action_diff_max"]
             print(f"Test loss: {total_loss / len(test_loader)}")
-            wandb.log({"eval/epoch_wise_action_diff": action_diff})
-            wandb.log({"eval/epoch_wise_action_diff_tot": action_diff_tot})
-            wandb.log({"eval/epoch_wise_action_diff_mean_res1": action_diff_mean_res1})
-            wandb.log({"eval/epoch_wise_action_diff_mean_res2": action_diff_mean_res2})
-            wandb.log({"eval/epoch_wise_action_diff_max": action_diff_max})
+            if not use_diffusion:
+                wandb.log({"eval/epoch_wise_action_diff": action_diff})
+                wandb.log({"eval/epoch_wise_action_diff_tot": action_diff_tot})
+                wandb.log({"eval/epoch_wise_action_diff_mean_res1": action_diff_mean_res1})
+                wandb.log({"eval/epoch_wise_action_diff_mean_res2": action_diff_mean_res2})
+                wandb.log({"eval/epoch_wise_action_diff_max": action_diff_max})
 
         cbet_model.train()
         for data in tqdm.tqdm(train_loader):
@@ -284,10 +305,15 @@ def main(cfg):
             wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
             loss.backward()
             optimizer.step()
-        
+
+            if use_diffusion:
+                cbet_model.ema_step()
+
         # save model
         if epoch % cfg.save_every == 0:
-            cbet_model.save_model(save_path)
+            # cbet_model.save_model(save_path)
+            torch.save(cbet_model, "{}/model_{}.pt".format(save_path, epoch))
+
 
     avg_reward, completion_id_list, max_coverage, final_coverage = eval_on_env(
         cfg,

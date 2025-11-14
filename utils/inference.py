@@ -157,6 +157,18 @@ def repeat_start_to_length(x: torch.Tensor, length: int, dim: int = 0):
     pad = first_frame.repeat(*repeat_shape)
     return torch.cat([pad, x], dim=dim)
 
+def repeat_end_to_length(x: torch.Tensor, length: int, dim: int = 0):
+    """
+    Pad tensor x to length along dim, repeating the last value at the end.
+    """
+    pad_size = length - x.shape[dim]
+    if pad_size <= 0:
+        return x
+    last_frame = x.index_select(dim, torch.tensor(x.shape[dim] - 1, device=x.device))
+    repeat_shape = [1] * len(x.shape)
+    repeat_shape[dim] = pad_size
+    pad = last_frame.repeat(*repeat_shape)
+    return torch.cat([x, pad], dim=dim)
 
 def nn_lookup(
     query: torch.Tensor,
