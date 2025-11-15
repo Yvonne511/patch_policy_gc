@@ -2,6 +2,31 @@ defaults:
   - env_vars: env_vars
   - encoder: libero_dynamo
   - _self_
+  - override hydra/launcher: submitit_slurm
+
+ckpt_base_path: /checkpoint/amaia/video/gzhou/exps/patch_policy
+
+hydra:
+  run:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True
+  sweep:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+    nodes: 1
+    tasks_per_node: 8
+    cpus_per_task: 16
+    mem_gb: 1600
+    gres: "gpu:h100:8"
+    qos: "explore"
+    timeout_min: 5760
+    setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
+            export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
+            "export MASTER_PORT=$(for port in $(shuf -i 30000-65500 -n 20); do if [[ $(netstat -tupln 2>&1 | grep $port | wc -l) -eq 0 ]] ; then echo $port; break; fi; done;)",]
+
 
 seed: 42
 window_size: 10
@@ -61,6 +86,7 @@ model:
   act_dim: ${env.act_dim}
   goal_dim: ${encoder.output_dim}
   views: ${env.views}
+  n_patches: 256 # TODO: may need to double this for multiview
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2
