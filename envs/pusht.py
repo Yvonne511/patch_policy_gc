@@ -1049,12 +1049,11 @@ class PushWrapper(gym.Wrapper):
         self.id = id
 
     def reset(self, goal_idx=None):
-        # print(1/0)
         print("reset env!!!!!")
         obs = self.env.reset()
         self.step_idx = 0
         return_obs = self.env.render(mode="rgb_array")
-        return_obs = einops.rearrange(return_obs, "H W C -> C H W") / 255.0  # 1 view (reverted)
+        return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
         return return_obs
 
     def step(self, action):
@@ -1069,6 +1068,6 @@ class PushWrapper(gym.Wrapper):
         info["max_coverage"] = max(self.coverage_arr)
         info["final_coverage"] = self.coverage_arr[-1]
         return_obs = info["image"]
-        return_obs = einops.rearrange(return_obs, "H W C -> C H W") / 255.0  # 1 view (reverted)
+        return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
 
         return return_obs, reward, done, info

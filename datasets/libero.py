@@ -19,8 +19,14 @@ class LiberoGoalDataset(TrajectoryDataset):
     #              robot0_gripper_qpos.npy
     #              object_states.npy
     #              actions.npy
-    def __init__(self, data_directory, subset_fraction: Optional[float] = None):
+    def __init__(
+            self, 
+            data_directory, 
+            subset_fraction: Optional[float] = None,
+            view_idx: Optional[int] = None
+        ):
         self.dir = Path(data_directory) / "libero_goal"
+        self.view_idx = view_idx
         self.task_names = list(self.dir.iterdir())
         self.task_names.sort()
         self.demos = []
@@ -97,18 +103,15 @@ class LiberoGoalDataset(TrajectoryDataset):
         agentview = agentview_obs[frames]
         robotview = robotview_obs[frames]
         # TODO: can concat along h or w
-        # obs = torch.stack([agentview, robotview], dim=1)
-        # obs = einops.rearrange(obs, "T V H W C -> T V C H W") / 255.0
+        obs = torch.stack([agentview, robotview], dim=1)
+        obs = einops.rearrange(obs, "T V H W C -> T V C H W") / 255.0
+        if self.view_idx is not None:
+            obs = obs[:, self.view_idx : self.view_idx + 1]
 
-        # ! assume using only agentview for now
-        obs = agentview
-        obs = einops.rearrange(obs, "T H W C -> T C H W") / 255.0
         act = self.actions[idx][frames]
-
         if self.goals is not None:
             task_idx = idx // 50
-            # goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1, 1)
-            goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1) # delete view dim
+            goal = self.goals[task_idx].repeat(len(frames), 1, 1, 1, 1)
             return obs, act, goal
         else:
             return obs, act, None

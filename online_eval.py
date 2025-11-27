@@ -37,15 +37,17 @@ def main(cfg):
 
     use_diffusion = "diffusion" in cfg.model['_target_']
 
+    save_path = Path(".")
+    model_name = os.getcwd().split("outputs/")[-1]
+
     run = wandb.init(
         project=cfg.wandb.project,
         entity=cfg.wandb.entity,
         config=OmegaConf.to_container(cfg, resolve=True),
+        name=model_name,  # Use current directory name
     )
-    run_name = run.name or "Offline"
-    save_path = Path(cfg.save_path) / run_name
-    save_path.mkdir(parents=True, exist_ok=False)
-    print("Saving to {}".format(save_path))
+
+    print("Saving to {}".format(os.getcwd()))
     video = VideoRecorder(dir_name=save_path)
 
     # init datasets
@@ -81,10 +83,10 @@ def main(cfg):
     )
     use_libero_goal = cfg.data.get("use_libero_goal", False)
     train_data = TrajectoryEmbeddingDataset(
-        encoder, train_data, device=cfg.device, embed_goal=use_libero_goal
+        encoder, train_data, device='cpu', embed_goal=use_libero_goal
     )
     test_data = TrajectoryEmbeddingDataset(
-        encoder, test_data, device=cfg.device, embed_goal=use_libero_goal
+        encoder, test_data, device='cpu', embed_goal=use_libero_goal
     )
     traj_slicer_kwargs = {
         "window": cfg.data.window_size,
@@ -113,8 +115,9 @@ def main(cfg):
                 idx = i * 50
                 last_obs, _, _ = dataset.get_frames(idx, [-1])  # 1 V C H W
                 last_obs = last_obs.to(cfg.device)
-                embd = encoder(last_obs)[0]  # V E
-                # embd = einops.rearrange(embd, "V E -> (V E)") # don't flatten patch dim
+                embd = encoder(last_obs)[0]  # V P E
+                assert embd.ndim == 3, "expect V P E here"
+                embd = einops.rearrange(embd, "V P E -> (V P) E") # don't flatten patch dim
                 goals_cache.append(embd)
 
         def goal_fn(goal_idx):
@@ -142,7 +145,7 @@ def main(cfg):
             result = enc(obs)
             # import pdb; pdb.set_trace()
             # result = einops.rearrange(result, "1 V E -> (V E)")
-            result = einops.rearrange(result, "1 V E -> V E") # don't flatten patch dim
+            result = einops.rearrange(result, "1 V P E -> (V P) E") # don't flatten patch dim
             return result
 
         avg_reward = 0
@@ -157,16 +160,16 @@ def main(cfg):
             for i in range(num_eval_per_goal):
                 obs_stack = deque(maxlen=cfg.eval_window_size)
                 this_obs = env.reset(goal_idx=goal_idx)  # V C H W
-                print(goal_idx, i)
+                print("Eval on goal {}/{}, episode {}/{}".format(goal_idx, num_evals, i, num_eval_per_goal))
                 assert (
                     this_obs.min() >= 0 and this_obs.max() <= 1
                 ), "expect 0-1 range observation"
-                this_obs_enc = embed(encoder, this_obs)
+                this_obs_enc = embed(encoder, this_obs) # V P E
                 obs_stack.append(this_obs_enc)
                 done, step, total_reward = False, 0, 0
                 goal = goal_fn(goal_idx)  # V C H W
                 while not done:
-                    obs = torch.stack(tuple(obs_stack)).float().to(cfg.device)
+                    obs = torch.stack(tuple(obs_stack)).float().to(cfg.device) # T V P E
                     goal = torch.as_tensor(goal, dtype=torch.float32, device=cfg.device)
                     # goal = embed(encoder, goal)
                     goal = einops.repeat(goal, '... -> t ...', t=cfg.eval_window_size)
@@ -275,9 +278,10 @@ def main(cfg):
             with torch.no_grad():
                 for data in test_loader:
                     obs, act, goal = (x.to(cfg.device) for x in data)
-                    assert obs.ndim == 4, "expect N T V E here"
-                    # obs = einops.rearrange(obs, "N T V E -> N T (V E)") # keep the patch dim
-                    # goal = einops.rearrange(goal, "N T V E -> N T (V E)")
+                    assert obs.ndim == 5, "expect N T V P E for obs"
+                    assert goal.ndim == 5, "expect N T V P E for goals"
+                    obs = einops.rearrange(obs, "N T V P E -> N T (V P) E") # keep the patch dim
+                    goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
                     predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
                     total_loss += loss.item()
                     wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
@@ -299,8 +303,8 @@ def main(cfg):
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
             obs, act, goal = (x.to(cfg.device) for x in data)
-            # obs = einops.rearrange(obs, "N T V E -> N T (V E)")
-            # goal = einops.rearrange(goal, "N T V E -> N T (V E)")
+            obs = einops.rearrange(obs, "N T V P E -> N T (V P) E")
+            goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
             wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
             loss.backward()

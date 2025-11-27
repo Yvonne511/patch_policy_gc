@@ -84,9 +84,9 @@ class BehaviorTransformer(nn.Module):
     ):
         super().__init__()
         self.GOAL_SPEC = ["concat", "stack", "unconditional"]
-        self._obs_dim = obs_dim * views
+        self._obs_dim = obs_dim
         self._act_dim = act_dim
-        self._goal_dim = goal_dim * views
+        self._goal_dim = goal_dim
         self._obs_window_size = obs_window_size
         self._act_window_size = act_window_size
         if goal_dim <= 0:
@@ -97,7 +97,7 @@ class BehaviorTransformer(nn.Module):
         self._gpt_model = GPT(
             GPTConfig(
                 block_size=obs_window_size + act_window_size, # TODO: Q: why? isn't obs_window_size enough?
-                n_patches=n_patches,
+                n_patches=n_patches * views,
                 n_layer=n_layer,
                 n_head=n_head,
                 n_embd=n_embd,
