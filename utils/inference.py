@@ -2,6 +2,7 @@ import torch
 import logging
 import numpy as np
 import torch.nn as nn
+from tqdm import tqdm
 from typing import Callable, List
 from accelerate import Accelerator
 from sklearn.linear_model import LinearRegression
@@ -47,12 +48,17 @@ def embed_trajectory_dataset(
     else:
         result = []
         accelerator = Accelerator()
-        device = device or accelerator.device  # result device
+        model_device = accelerator.device
+        result_device = torch.device(device) if device is not None else torch.device("cpu")
+        print("########## Embedding dataset on single device, save device:", result_device)
+
         with eval_mode(model, no_grad=True):
-            for i in range(len(dataset)):
+            for i in tqdm(range(len(dataset)), total=len(dataset)):
                 obs, *rest = dataset[i]
-                obs = obs.to(accelerator.device)
-                obs_enc = model(obs).to(device)
+                obs = obs.to(model_device)
+                obs_enc = model(obs)
+                obs_enc = obs_enc.detach().to(result_device)
+
                 if obs_only:
                     result.append(obs_enc)
                 else:
@@ -60,10 +66,11 @@ def embed_trajectory_dataset(
                         # assuming goal comes last
                         goal = rest[-1]
                         rest = rest[:-1]
-                        goal = goal.to(accelerator.device)
-                        goal_enc = model(goal).to(device)
+                        goal = goal.to(model_device)
+                        goal_enc = model(goal)
+                        goal_enc = goal_enc.detach().to(result_device)
                         rest.append(goal_enc)
-                    rest = [x.to(device) for x in rest]
+                    rest = [x.to(result_device) for x in rest]
                     result.append((obs_enc, *rest))
         return result
 

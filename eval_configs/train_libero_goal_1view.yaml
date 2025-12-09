@@ -1,11 +1,11 @@
 defaults:
   - env_vars: env_vars
-  - encoder: dino_patch
+  - encoder: libero_dynamo
   - _self_
   - override hydra/launcher: submitit_slurm
 
 ckpt_base_path: /checkpoint/amaia/video/gzhou/exps/patch_policy
-  
+
 hydra:
   run:
     dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
@@ -29,44 +29,43 @@ hydra:
 
 
 seed: 42
-window_size: 3
-goal_window_size: 3
-eval_window_size: 3
-batch_size: 64
-epochs: 300
+window_size: 10
+goal_window_size: 10
+eval_window_size: 10
+
+batch_size: 16
+epochs: 50
 eval_freq: 10
-eval_on_env_freq: 100
-num_env_evals: 100
-num_final_evals: 100
-num_final_eval_per_goal: 1
+eval_on_env_freq: 1
+num_env_evals: 10
+num_final_evals: 10
+num_final_eval_per_goal: 10
 action_window_size: 1
-
-goal_dim: 0
-train_fraction: 0.9
-
 
 wandb:
   project: dynamo-repro
   entity: ${env_vars.wandb_entity}
+train_fraction: 0.9
 
 device: cuda
 optim:
-  lr: 1e-4
-  weight_decay: 0.0
+  lr: 5.5e-5
+  weight_decay: 2e-4
   betas: [0.9, 0.999]
 
 env:
   gym:
-    _target_: envs.block_pushing.block_pushing_multimodal.BlockPushMultimodalMultiview
-    id: blockpush
-    view_idx: 0
-  goal_dim: ${goal_dim}
-  act_dim: 2
+    _target_: envs.libero.libero_env.LiberoEnv
+    id: libero_goal
+    view_idx: 0 # 0 for third person view, 1 for wrist view 
+  obs_dim: 60
+  act_dim: 7
   views: 1
 
+
 dataset:
-  _target_: datasets.block_pushing.PushMultiviewTrajectoryDataset
-  data_directory: ${env_vars.datasets.block_push}
+  _target_: datasets.libero.LiberoGoalDataset
+  data_directory: ${env_vars.datasets.libero}
   view_idx: 0
 
 data:
@@ -76,6 +75,8 @@ data:
   goal_conditional: future
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
+  use_libero_goal: true
+  view_idx: 0 # 0 for third person view, 1 for wrist view 
 
 save_every: 100
 save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
@@ -83,20 +84,20 @@ load_path: null
 
 model:
   _target_: models.vq_behavior_transformer.bet.BehaviorTransformer
-  n_patches: 256
   obs_dim: ${encoder.output_dim}
   act_dim: ${env.act_dim}
-  goal_dim: ${env.goal_dim}
+  goal_dim: ${encoder.output_dim}
   views: ${env.views}
+  n_patches: 256 # TODO: may need to double this for multiview
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2
-  vqvae_fit_steps: 1614
+  vqvae_fit_steps: 884
   vqvae_iters: 300
   n_layer: 6
   n_head: 6
   n_embd: 120
-  vqvae_batch_size: 1024
+  vqvae_batch_size: 2048
   act_scale: 1
   obs_window_size: ${window_size}
   act_window_size: ${action_window_size}

@@ -15,7 +15,7 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
         subset_fraction: Optional[float] = None,
         prefetch: bool = True,
         view_idx: Optional[int] = None,
-    ):
+    ):  
         self.data_directory = Path(data_directory)
         self.states = np.load(self.data_directory / "multimodal_push_observations.npy")
         self.actions = np.load(self.data_directory / "multimodal_push_actions.npy")
@@ -68,15 +68,21 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
         mask = self.masks[idx, frames]
         if self.onehot_goals:
             goal = self.goals[idx, frames]
-            return obs, act, mask, goal
+            # return obs, act, mask, goal
+            return obs, act, goal # TODO: check, not used? 
         else:
-            return obs, act, mask
+            dummy_goal = torch.ones([obs.shape[0], 1, 1, 1]) # dummy goal, T V P E
+            return obs, act, dummy_goal
 
     def __getitem__(self, idx):
         T = self.masks[idx].sum().int().item()
         output = self.get_frames(idx, range(T))
         if self.view_idx is not None:
-            output = (output[0][:, self.view_idx], output[1], output[2])
+            output = (
+                output[0][:, self.view_idx : self.view_idx + 1],
+                output[1],
+                output[2],
+            )
         return output
 
     def __len__(self):

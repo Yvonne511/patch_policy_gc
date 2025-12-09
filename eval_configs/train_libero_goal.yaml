@@ -17,10 +17,10 @@ hydra:
   launcher:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
     nodes: 1
-    tasks_per_node: 8
+    tasks_per_node: 1
     cpus_per_task: 16
     mem_gb: 1600
-    gres: "gpu:h100:8"
+    gres: "gpu:h100:1"
     qos: "explore"
     timeout_min: 5760
     setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
@@ -57,10 +57,11 @@ env:
   gym:
     _target_: envs.libero.libero_env.LiberoEnv
     id: libero_goal
+    view_idx: null # use all views
   obs_dim: 60
   act_dim: 7
   # views: 2
-  views: 1
+  views: 2
 
 
 dataset:
@@ -75,9 +76,10 @@ data:
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
   use_libero_goal: true
+  view_idx: null # use all views
 
 save_every: 100
-save_path: "${env_vars.save_path}/checkpoints/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 load_path: null
 
 model:
@@ -86,7 +88,7 @@ model:
   act_dim: ${env.act_dim}
   goal_dim: ${encoder.output_dim}
   views: ${env.views}
-  n_patches: 256 # TODO: may need to double this for multiview
+  n_patches: 256
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2

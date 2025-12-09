@@ -1,4 +1,5 @@
 import torch
+import einops
 import torch.nn as nn
 
 torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
@@ -28,10 +29,15 @@ class DinoV2Encoder(nn.Module):
                 self.latent_ndim = 1
 
     def forward(self, x):
+        b, v, c, h, w = x.shape
+        x = x.reshape(b * v, c, h, w)
+
         emb = self.base_model.forward_features(x)[self.feature_key]
+        emb = einops.rearrange(emb, '(b v) ... -> b v ...', b=b) # b v p e
+
         if self.postprocess == 'avg_pool':
-            emb = torch.mean(emb, dim=(1))
+            emb = torch.mean(emb, dim=(2)) # (b, v, e)
 
         if self.latent_ndim == 1:
-            emb = emb.unsqueeze(1) # dummy patch dim
+            emb = emb.unsqueeze(2) # dummy patch dim, b v 1 e
         return emb

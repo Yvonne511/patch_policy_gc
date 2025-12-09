@@ -55,7 +55,7 @@ data:
   min_future_sep: ${action_window_size}
 
 save_every: 1
-save_path: "${env_vars.save_path}/checkpoints/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 load_path: null
 
 model:

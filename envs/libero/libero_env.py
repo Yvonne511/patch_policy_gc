@@ -46,7 +46,7 @@ class LiberoEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
     def __init__(
-        self, task_suite_name="libero_goal", image_size=IMAGE_SIZE, id="libero_goal"
+        self, task_suite_name="libero_goal", image_size=IMAGE_SIZE, id="libero_goal", view_idx=None
     ):
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(7,), dtype=np.float32)
         self.image_size = image_size
@@ -61,6 +61,7 @@ class LiberoEnv(gym.Env):
         self.steps = 0
         self.goal_idx = 0
         self.episodes = 0
+        self.view_idx = view_idx
 
     def seed(self, seed=None):
         self._seed = seed
@@ -99,8 +100,7 @@ class LiberoEnv(gym.Env):
         obs = self._get_img_obs(obs)
         reward, info["task_rewards"] = self.get_rewards()
         info["finished_tasks"] = self.finished_tasks.copy()
-        # info["image"] = einops.rearrange(obs, "V C H W -> H (V W) C")
-        info["image"] = einops.rearrange(obs, "C H W -> H W C") # !
+        info["image"] = einops.rearrange(obs, "V C H W -> H (V W) C")
         info["all_completions_ids"] = []
 
         cur_task = self.task_names[self.goal_idx]
@@ -118,18 +118,17 @@ class LiberoEnv(gym.Env):
         return np.concatenate((obs[0], obs[1]), axis=1).astype(np.uint8)
 
     def _get_img_obs(self, obs, flip=True, channel_first=True):
-        # TODO: change this, can concat along h or w
         if flip:
             obs["agentview_image"] = obs["agentview_image"][::-1]
             obs["robot0_eye_in_hand_image"] = obs["robot0_eye_in_hand_image"][::-1]
-        # obs = np.stack(
-        #     [obs["agentview_image"], obs["robot0_eye_in_hand_image"]], axis=0
-        # )
-        # if channel_first:
-        #     obs = einops.rearrange(obs, "V H W C -> V C H W")
-        obs = obs["agentview_image"]
+        obs = np.stack(
+            [obs["agentview_image"], obs["robot0_eye_in_hand_image"]], axis=0
+        ) 
+        if self.view_idx is not None:
+            obs = obs[self.view_idx : self.view_idx + 1]
+
         if channel_first:
-            obs = einops.rearrange(obs, "H W C -> C H W")
+            obs = einops.rearrange(obs, "V H W C -> V C H W")
         return obs
 
     def _get_task_bddl_file(self, task_name):

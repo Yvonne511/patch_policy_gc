@@ -63,10 +63,12 @@ class PushTDataset(TrajectoryDataset):
             vid_dir = self.data_directory / "obses"
             obs = torch.load(str(vid_dir / f"episode_{idx:03d}.pth"))
             obs = obs[frames]
-        obs = einops.rearrange(obs, "T H W C -> T C H W") / 255.0  # T V C H W, 1 view (reverted)
+        obs = einops.rearrange(obs, "T H W C -> T 1 C H W") / 255.0  # T V C H W, 1 view
         act = self.actions[idx, frames]
         mask = torch.ones(len(act)).bool()
-        return obs, act, mask
+        dummy_goal = torch.ones([obs.shape[0], 1, 1, 1]) # dummy goal, T V P E
+        # return obs, act, mask, goal
+        return obs, act, dummy_goal
 
     def __getitem__(self, idx):
         return self.get_frames(idx, range(self.get_seq_length(idx)))
