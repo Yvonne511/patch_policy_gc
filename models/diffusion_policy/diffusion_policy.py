@@ -11,6 +11,7 @@ import torch.nn as nn
 import einops
 import torch.nn.functional as F
 import sys
+from models.vq_behavior_transformer.gpt import generate_mask_matrix
 
 sys.path.append("/home/garypan/dynamo_ssl")
 
@@ -146,6 +147,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
         time_as_cond: bool = True,
         obs_as_cond: bool = False,
         n_cond_layers: int = 0,
+        n_patches: int = 1,
     ) -> None:
         super().__init__()
 
@@ -158,10 +160,11 @@ class TransformerForDiffusion(ModuleAttrMixin):
         if not time_as_cond:
             T += 1
             T_cond -= 1
+        
         obs_as_cond = cond_dim > 0
         if obs_as_cond:
             assert time_as_cond
-            T_cond += n_obs_steps
+            T_cond += n_obs_steps * n_patches
 
         # input embedding stem
         self.input_emb = nn.Linear(input_dim, n_emb)
@@ -227,7 +230,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             self.encoder = nn.TransformerEncoder(
                 encoder_layer=encoder_layer, num_layers=n_layer
             )
-
+        self.n_patches = n_patches
         # attention mask
         if causal_attn:
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -241,19 +244,57 @@ class TransformerForDiffusion(ModuleAttrMixin):
                 .masked_fill(mask == 1, float(0.0))
             )
             self.register_buffer("mask", mask)
-
+            
+            # print(">>> DEBUG: mask (causal) shape:", mask.shape)  # should be (T, T)
+            # print("mask[0,:5] =", mask[0, :5])   # first row, first 5 entries
+            # print("mask[-1,:5] =", mask[-1, :5]) # last row, first 5 entries
+            
             if time_as_cond and obs_as_cond:
-                S = T_cond
-                t, s = torch.meshgrid(torch.arange(T), torch.arange(S), indexing="ij")
-                mask = t >= (
-                    s - 1
-                )  # add one dimension since time is the first token in cond
-                mask = (
-                    mask.float()
-                    .masked_fill(mask == 0, float("-inf"))
-                    .masked_fill(mask == 1, float(0.0))
-                )
-                self.register_buffer("memory_mask", mask)
+                # Build patch-aware memory mask:
+                # S = total cond tokens = 1 (time) + n_obs_steps * n_patches
+                S_patches = n_obs_steps * self.n_patches
+                S = 1 + S_patches
+
+                # generate_mask_matrix returns shape (1,1,S_patches,S_patches)
+                # squeeze to (S_patches, S_patches)
+                patch_block = generate_mask_matrix(self.n_patches, n_obs_steps).squeeze(0).squeeze(0)
+                # print(self.n_patches, n_obs_steps)
+                # print(">>> DEBUG: patch_block (before sanity check) shape:", patch_block.shape)
+                # sanity check
+                assert patch_block.shape == (S_patches, S_patches), "patch_block shape mismatch"
+
+                # convert to bool for logical ops
+                patch_block = patch_block.bool()
+
+                # create memory_mask boolean (T, S) where True => allowed
+                mem_bool = torch.zeros((T, S), dtype=torch.bool)
+                mem_bool[:, 0] = True  # allow decoder positions to always see the time token (s=0)
+
+                # For decoder timestep t, allow patches from observation-windows up through obs_step.
+                # Map decoder t -> obs window index (clamped).
+                for t_idx in range(T):
+                    obs_step = min(t_idx, n_obs_steps - 1)  # clamp to valid obs windows
+                    # rows corresponding to windows 0..obs_step:
+                    rows_to_use = (obs_step + 1) * self.n_patches  # count of patch-rows to include
+                    # take those rows from patch_block and see which columns are reachable
+                    rows = patch_block[:rows_to_use, :]               # shape (rows_to_use, S_patches)
+                    allowed_cols = rows.any(dim=0)                    # shape (S_patches,)
+                    # fill memory boolean skipping time token at index 0
+                    mem_bool[t_idx, 1:] = allowed_cols
+
+                # Convert boolean mask to additive-style mask expected by nn.Transformer: 0.0 allowed / -inf blocked
+                mem_mask = mem_bool.float().masked_fill(~mem_bool, float("-inf")).masked_fill(mem_bool, float(0.0))
+                self.register_buffer("memory_mask", mem_mask)
+
+                # print(">>> DEBUG: patch_block shape:", patch_block.shape)  # (S_patches, S_patches)
+                # print("patch_block (top-left 5x5):\n", patch_block[:5, :5].int())
+                # print(">>> DEBUG: memory_mask shape:", mem_mask.shape)  # (T, S)
+                # print("row 0 sum (tokens allowed at t=0):", mem_bool[0].sum().item())
+                # print("row 1 sum (tokens allowed at t=1):", mem_bool[1].sum().item())
+                # print("last row sum (tokens allowed at t=T-1):", mem_bool[-1].sum().item())
+                # for t_idx in range(T):
+                #     allowed = torch.where(mem_bool[t_idx])[0]
+                #     print(f"t={t_idx}, allowed_count={len(allowed)}, first10={allowed[:10].tolist()}")
             else:
                 self.memory_mask = None
         else:
@@ -425,7 +466,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
 
         # process input
         input_emb = self.input_emb(sample)
-
+        
         if self.encoder_only:
             # BERT
             token_embeddings = torch.cat([time_emb, input_emb], dim=1)
@@ -467,7 +508,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
                 tgt=x, memory=memory, tgt_mask=self.mask, memory_mask=self.memory_mask
             )
             # (B,T,n_emb)
-
+        
         # head
         x = self.ln_f(x)
         x = self.head(x)
@@ -673,6 +714,7 @@ class DiffusionPolicy(nn.Module):
         lr: float = 1e-4,
         weight_decay: float = 0.0,
         use_transform=None,
+        n_patches=1,
     ):
         super().__init__()
         self.obs_dim = obs_dim
@@ -716,6 +758,7 @@ class DiffusionPolicy(nn.Module):
             time_as_cond=True,
             obs_as_cond=True,
             n_cond_layers=0,
+            n_patches=n_patches,
         ).cuda()
         #############################################################
         # for this demo, we use DDPMScheduler with 100 diffusion iterations
@@ -762,59 +805,53 @@ class DiffusionPolicy(nn.Module):
         action_seq: Optional[torch.Tensor],
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Dict[str, float]]:
         # Assume dimensions are N T D for N sequences of T timesteps with dimension D.
+        device = self.noise_pred_net.device
 
-        # # TODO: assume visuals have 1 patch dim, only taking the first patch for now
-        obs_seq = obs_seq[..., 0, :]
-        
-        if obs_seq.shape[1] < self.obs_horizon:
-            obs_seq = torch.cat(
-                (
-                    torch.tile(
-                        obs_seq[:, 0, :], (1, self.obs_horizon - obs_seq.shape[1], 1)
-                    ),
-                    obs_seq,
-                ),
-                dim=-2,
-            )
+        # --- Build obs_cond (B, T_obs * n_patches, patch_dim) ---
+        if obs_seq.ndim == 4:
+            B, T_obs, n_patches, patch_dim = obs_seq.shape
+            obs_patches = obs_seq.reshape(B, T_obs * n_patches, patch_dim)
+        elif obs_seq.ndim == 3:
+            B, T_obs, patch_dim = obs_seq.shape
+            n_patches = 1
+            obs_patches = obs_seq
+        else:
+            raise ValueError(f"Unexpected obs_seq.ndim {obs_seq.ndim}")
+
+        # pad time windows if needed (repeat first time-step's patch block)
+        if T_obs < self.obs_horizon:
+            missing_time = self.obs_horizon - T_obs
+            pad_tokens = obs_patches[:, :n_patches, :].repeat(1, missing_time, 1)
+            obs_patches = torch.cat([pad_tokens, obs_patches], dim=1)
+            # now obs_patches length == obs_horizon * n_patches
+
+        # handle goal stacking here
         if self.cond_method == "stack":
             assert goal_seq is not None
-            obs_seq = torch.cat([obs_seq, goal_seq], dim=-1)
-        action_seq = self.normalize_data(action_seq)
-        nobs = obs_seq.cuda()
-        naction = action_seq.cuda()
-        B = nobs.shape[0]
+            # TODO: implement consistent goal->cond mapping (tokens or concat)
+            pass
 
-        # observation as FiLM conditioning
-        # (B, obs_horizon, obs_dim)
-        obs_cond = nobs[:, : self.obs_horizon, :]
-        # (B, obs_horizon * obs_dim)
-        # obs_cond = obs_cond.flatten(start_dim=1)
+        # move to device & correct dtype
+        obs_cond = obs_patches.to(device)
+        obs_cond = obs_cond.to(next(self.noise_pred_net.parameters()).dtype)
 
-        # sample noise to add to actions
-        noise = torch.randn(naction.shape, device="cuda")
+        # --- Prepare actions and noise ---
+        assert action_seq is not None
+        naction = self.normalize_data(action_seq).to(device).to(next(self.noise_pred_net.parameters()).dtype)
+        B = naction.shape[0]
+        noise = torch.randn_like(naction, device=device)
 
-        # sample a diffusion iteration for each data point
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (B,), device="cuda"
+            0, self.noise_scheduler.config.num_train_timesteps, (B,), device=device
         ).long()
 
-        # add noise to the clean images according to the noise magnitude at each diffusion iteration
-        # (this is the forward diffusion process)
         noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
 
-        # predict the noise residual
-        ##################### jay transformer #####################
+        # predict noise (pass the full obs_cond)
         noise_pred = self.noise_pred_net(noisy_actions, timesteps, cond=obs_cond)
-        ######################### jay cnn #########################
-        # obs_cond = obs_cond.flatten(start_dim=1)
-        # noise_pred = self.noise_pred_net(
-        #     noisy_actions, timesteps, global_cond=obs_cond)
-        #############################################################
-        # L2 loss
+
         loss = nn.functional.mse_loss(noise_pred, noise)
-        loss_dict = {
-            "total_loss": loss.detach().cpu().item(),
-        }
+        loss_dict = {"total_loss": loss.detach().cpu().item()}
         return None, loss, loss_dict
 
     def normalize_data(self, data):
@@ -830,67 +867,42 @@ class DiffusionPolicy(nn.Module):
         action_seq: Optional[torch.Tensor],
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Dict[str, float]]:
         
-        # TODO: assume visuals have 1 patch dim, only taking the first patch for now
-        obs_seq = obs_seq[..., 0, :]
+        device = self.noise_pred_net.device
 
-        self.ema_noise_pred_net = self.ema.averaged_model
-        B = obs_seq.shape[0]
-        # stack the last obs_horizon (2) number of observations
-        if obs_seq.shape[1] < self.obs_horizon:
-            obs_seq = torch.cat(
-                (
-                    torch.tile(
-                        obs_seq[:, 0, :], (1, self.obs_horizon - obs_seq.shape[1], 1)
-                    ),
-                    obs_seq,
-                ),
-                dim=-2,
-            )
-        # normalize observation
+        if obs_seq.ndim == 4:
+            B, T_obs, n_patches, patch_dim = obs_seq.shape
+            obs_patches = obs_seq.reshape(B, T_obs * n_patches, patch_dim)
+        elif obs_seq.ndim == 3:
+            B, T_obs, patch_dim = obs_seq.shape
+            n_patches = 1
+            obs_patches = obs_seq
+        else:
+            raise ValueError(f"Unexpected obs_seq.ndim {obs_seq.ndim}")
+
+        if T_obs < self.obs_horizon:
+            missing_time = self.obs_horizon - T_obs
+            pad_tokens = obs_patches[:, :n_patches, :].repeat(1, missing_time, 1)
+            obs_patches = torch.cat([pad_tokens, obs_patches], dim=1)
+
         if self.cond_method == "stack":
             assert goal_seq is not None
-            nobs = torch.cat([obs_seq, goal_seq], dim=-1)
-        else:
-            nobs = obs_seq
+            # TODO: implement same stacking behavior as in _update
 
-        # infer action
-        with torch.no_grad():
-            # reshape observation to (B,obs_horizon*obs_dim)
-            # obs_cond = nobs.unsqueeze(0).flatten(start_dim=1)
+        obs_cond = obs_patches.to(device)
+        obs_cond = obs_cond.to(next(self.noise_pred_net.parameters()).dtype)
 
-            # initialize action from Guassian noise
-            noisy_action = torch.randn(
-                (B, self.pred_horizon, self.action_dim), device="cuda"
-            )
-            naction = noisy_action
+        # sampling with EMA model
+        self.ema_noise_pred_net = self.ema.averaged_model
+        B = obs_cond.shape[0]
+        noisy_action = torch.randn((B, self.pred_horizon, self.action_dim), device=device, dtype=next(self.noise_pred_net.parameters()).dtype)
+        naction = noisy_action
 
-            # init scheduler
-            self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
+        self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
+        for k in self.noise_scheduler.timesteps:
+            noise_pred = self.ema_noise_pred_net(sample=naction, timestep=k, cond=obs_cond)
+            naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
 
-            for k in self.noise_scheduler.timesteps:
-                # predict noise
-                ##################### jay transformer #####################
-                obs_cond = nobs
-                noise_pred = self.ema_noise_pred_net(
-                    sample=naction, timestep=k, cond=obs_cond
-                )
-                ######################### jay cnn #########################
-                # obs_cond = nobs.unsqueeze(0).flatten(start_dim=1)
-                # noise_pred = self.ema_noise_pred_net(
-                #     sample=naction,
-                #     timestep=k,
-                #     global_cond=obs_cond
-                # )
-                #############################################################
-                # inverse diffusion step (remove noise)
-                naction = self.noise_scheduler.step(
-                    model_output=noise_pred, timestep=k, sample=naction
-                ).prev_sample
-
-        # unnormalize action
-        # naction = naction.detach().to("cpu")
         naction = naction.detach()
-        # (B, pred_horizon, action_dim)
         action_pred = self.unnormalize_data(naction)
         start = self.obs_horizon - 1
         end = start + self.action_horizon
