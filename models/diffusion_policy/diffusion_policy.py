@@ -704,6 +704,7 @@ class DiffusionPolicy(nn.Module):
         obs_horizon: int,
         pred_horizon: int,
         action_horizon: int,
+        views=1,
         data_act_scale=1.0,
         visual_input=False,
         p_drop_emb: float = 0.0,
@@ -758,7 +759,7 @@ class DiffusionPolicy(nn.Module):
             time_as_cond=True,
             obs_as_cond=True,
             n_cond_layers=0,
-            n_patches=n_patches,
+            n_patches=n_patches * views,
         ).cuda()
         #############################################################
         # for this demo, we use DDPMScheduler with 100 diffusion iterations
@@ -810,28 +811,27 @@ class DiffusionPolicy(nn.Module):
         # --- Build obs_cond (B, T_obs * n_patches, patch_dim) ---
         if obs_seq.ndim == 4:
             B, T_obs, n_patches, patch_dim = obs_seq.shape
-            obs_patches = obs_seq.reshape(B, T_obs * n_patches, patch_dim)
         elif obs_seq.ndim == 3:
-            B, T_obs, patch_dim = obs_seq.shape
-            n_patches = 1
-            obs_patches = obs_seq
+            obs_seq = obs_seq.unsqueeze(2)  # add n_patches dim
+            B, T_obs, n_patches, patch_dim = obs_seq.shape
         else:
             raise ValueError(f"Unexpected obs_seq.ndim {obs_seq.ndim}")
 
+        assert T_obs <= self.obs_horizon, f"T_obs {T_obs} > obs_horizon {self.obs_horizon}!!!!!"
+        
         # pad time windows if needed (repeat first time-step's patch block)
         if T_obs < self.obs_horizon:
             missing_time = self.obs_horizon - T_obs
-            pad_tokens = obs_patches[:, :n_patches, :].repeat(1, missing_time, 1)
-            obs_patches = torch.cat([pad_tokens, obs_patches], dim=1)
-            # now obs_patches length == obs_horizon * n_patches
+            pad_tokens = obs_seq[:, 0].repeat(1, missing_time, 1, 1)
+            obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
 
         # handle goal stacking here
-        if self.cond_method == "stack":
-            assert goal_seq is not None
-            # TODO: implement consistent goal->cond mapping (tokens or concat)
-            pass
+        if self.cond_method == "unconditional":
+            cond = obs_seq
+        elif self.cond_method == "stack":
+            cond = torch.cat([goal_seq, obs_seq], dim=-1) 
 
-        # move to device & correct dtype
+        obs_patches = einops.rearrange(cond, 'b t p d -> b (t p) d')
         obs_cond = obs_patches.to(device)
         obs_cond = obs_cond.to(next(self.noise_pred_net.parameters()).dtype)
 
@@ -871,23 +871,27 @@ class DiffusionPolicy(nn.Module):
 
         if obs_seq.ndim == 4:
             B, T_obs, n_patches, patch_dim = obs_seq.shape
-            obs_patches = obs_seq.reshape(B, T_obs * n_patches, patch_dim)
         elif obs_seq.ndim == 3:
-            B, T_obs, patch_dim = obs_seq.shape
-            n_patches = 1
-            obs_patches = obs_seq
+            obs_seq = obs_seq.unsqueeze(2)  # add n_patches dim
+            B, T_obs, n_patches, patch_dim = obs_seq.shape
         else:
             raise ValueError(f"Unexpected obs_seq.ndim {obs_seq.ndim}")
 
+        assert T_obs <= self.obs_horizon, f"T_obs {T_obs} > obs_horizon {self.obs_horizon}!!!!!"
+
+        # pad time windows if needed (repeat first time-step's patch block)
         if T_obs < self.obs_horizon:
             missing_time = self.obs_horizon - T_obs
-            pad_tokens = obs_patches[:, :n_patches, :].repeat(1, missing_time, 1)
-            obs_patches = torch.cat([pad_tokens, obs_patches], dim=1)
+            pad_tokens = obs_seq[:, 0].repeat(1, missing_time, 1, 1)
+            obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
 
-        if self.cond_method == "stack":
-            assert goal_seq is not None
-            # TODO: implement same stacking behavior as in _update
+        # handle goal stacking here
+        if self.cond_method == "unconditional":
+            cond = obs_seq
+        elif self.cond_method == "stack":
+            cond = torch.cat([goal_seq, obs_seq], dim=-1) 
 
+        obs_patches = einops.rearrange(cond, 'b t p d -> b (t p) d')
         obs_cond = obs_patches.to(device)
         obs_cond = obs_cond.to(next(self.noise_pred_net.parameters()).dtype)
 

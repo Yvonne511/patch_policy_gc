@@ -31,20 +31,20 @@ hydra:
 
 
 seed: 42
-window_size: 5
-goal_window_size: 5
-eval_window_size: 5
+window_size: 2
+goal_window_size: 2
+eval_window_size: 2
 
 batch_size: 256 # TODO: reduce for patch features 
-epochs: 5000
+epochs: 2000
 eval_freq: 10
-eval_on_env_freq: 100
-num_env_evals: 2 # 
+eval_on_env_freq: 10
+num_env_evals: 100 # 
 num_final_evals: 100
 num_final_eval_per_goal: 1
 action_window_size: 10
 
-pred_horizon: 13 # Total seq length to predict to roll out
+pred_horizon: 10 # Total seq length to predict to roll out
 n_action_steps: 8 # Action steps to roll out
 
 goal_dim: 0
@@ -91,6 +91,7 @@ model:
   obs_dim: ${encoder.output_dim}
   act_dim: ${env.act_dim}
   goal_dim: ${env.goal_dim}
+  views: ${env.views}
   obs_horizon: ${window_size}
   pred_horizon: ${pred_horizon}
   action_horizon: ${n_action_steps}
