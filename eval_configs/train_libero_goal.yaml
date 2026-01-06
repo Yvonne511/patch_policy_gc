@@ -1,18 +1,16 @@
 defaults:
   - env_vars: env_vars
-  - encoder: libero_dynamo
+  - encoder: dino_patch
   - _self_
   - override hydra/launcher: submitit_slurm
 
-ckpt_base_path: /checkpoint/amaia/video/gzhou/exps/patch_policy
-
 hydra:
   run:
-    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
     chdir: True
   sweep:
-    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
   launcher:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
@@ -43,7 +41,7 @@ num_final_eval_per_goal: 10
 action_window_size: 1
 
 wandb:
-  project: dynamo-repro
+  project: patch_policy
   entity: ${env_vars.wandb_entity}
 train_fraction: 0.9
 

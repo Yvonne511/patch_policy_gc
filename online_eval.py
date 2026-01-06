@@ -400,12 +400,14 @@ def main(cfg):
 
         accelerator.wait_for_everyone()
         cbet_model.train()
+        train_loss = 0
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
             obs, act, goal = (x.to(cfg.device) for x in data)
             obs = einops.rearrange(obs, "N T V P E -> N T (V P) E")
             goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
+            train_loss += loss.item()
             accelerator.backward(loss)
             optimizer.step()
 
@@ -418,7 +420,9 @@ def main(cfg):
 
             if accelerator.is_main_process:
                 wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
-        
+                
+        print(f"Train loss: {train_loss / len(train_loader)}")
+
         # save model
         if epoch % cfg.save_every == 0 and accelerator.is_main_process:
             print("cbet_model type", type(cbet_model))
