@@ -36,8 +36,9 @@ def embed_trajectory_dataset(
     obs_only=True,
     device=None,
     embed_goal=False,
-):
-    if type(model) is nn.parallel.DistributedDataParallel:
+):  
+    if False:
+    # if type(model) is nn.parallel.DistributedDataParallel:
         return embed_trajectory_dataset_ddp(
             model,
             dataset,
@@ -46,6 +47,7 @@ def embed_trajectory_dataset(
             embed_goal=embed_goal,
         )
     else:
+        print("########## Embedding dataset on single device")
         result = []
         accelerator = Accelerator()
         model_device = accelerator.device

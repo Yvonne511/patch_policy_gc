@@ -1,3 +1,4 @@
+from distutils import log
 import einops
 import os
 import random
@@ -18,6 +19,17 @@ from datasets.vqbet_repro import TrajectorySlicerDataset
 
 from utils.normalizer import LinearNormalizer
 
+from datetime import timedelta, datetime
+from accelerate import Accelerator
+# from accelerate.logging import get_logger
+import logging
+from accelerate import InitProcessGroupKwargs, DistributedDataParallelKwargs
+from hydra.core.hydra_config import HydraConfig
+from hydra.types import RunMode
+import torch.distributed as dist
+
+os.environ["WANDB_START_METHOD"] = "thread"
+logger = logging.getLogger(__name__)
 
 if "MUJOCO_GL" not in os.environ:
     os.environ["MUJOCO_GL"] = "egl"
@@ -32,6 +44,50 @@ def seed_everything(random_seed: int):
 
 @hydra.main(config_path="eval_configs", version_base="1.2")
 def main(cfg):
+    if HydraConfig.get().mode == RunMode.MULTIRUN:
+        logger.info(" Multirun setup begin...")
+        logger.info(f"SLURM_JOB_NODELIST={os.environ['SLURM_JOB_NODELIST']}")
+        logger.info(f"DEBUGVAR={os.environ['DEBUGVAR']}")
+        # ==== init ddp process group ====
+        os.environ["RANK"] = os.environ["SLURM_PROCID"]
+        os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
+        os.environ["LOCAL_RANK"] = os.environ["SLURM_LOCALID"]
+        try:
+            dist.init_process_group(
+                backend="nccl",
+                init_method="env://",
+                timeout=timedelta(hours=2),  # Extended timeout for eval variance
+            )
+            log.info("Multirun setup completed.")
+        except Exception as e:
+            log.error(f"DDP setup failed: {e}")
+            raise
+        torch.distributed.barrier()
+    process_group_kwargs = InitProcessGroupKwargs(
+            timeout=timedelta(hours=2),  # Extended timeout for eval variance
+        )
+    dist_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    accelerator = Accelerator(
+        log_with="wandb", kwargs_handlers=[process_group_kwargs, dist_kwargs]
+    )
+    logger.info(f"Mixed precision: {accelerator.mixed_precision}")
+    logger.info(
+        f"rank: {accelerator.local_process_index}"
+    )
+    device = accelerator.device
+    logger.info(f"device: {device}")
+    assert cfg.batch_size % accelerator.num_processes == 0, (
+        "Batch size must be divisible by the number of processes. "
+        f"Batch_size: {cfg.batch_size} num_processes: {accelerator.num_processes}."
+    )
+
+    OmegaConf.set_struct(cfg, False)
+    cfg.effective_batch_size = cfg.batch_size
+    cfg.gpu_batch_size = cfg.batch_size // accelerator.num_processes
+    OmegaConf.set_struct(cfg, True)
+
+    accelerator.wait_for_everyone()
+    
     print(OmegaConf.to_yaml(cfg))
     seed_everything(cfg.seed)
 
@@ -39,13 +95,15 @@ def main(cfg):
 
     save_path = Path(".")
     model_name = os.getcwd().split("outputs/")[-1]
-
-    run = wandb.init(
-        project=cfg.wandb.project,
-        entity=cfg.wandb.entity,
-        config=OmegaConf.to_container(cfg, resolve=True),
-        name=model_name,  # Use current directory name
-    )
+    
+    # Hydra changes working directory to the run directory, so just use current directory
+    if accelerator.is_main_process:
+        run = wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            name=model_name,  # Use current directory name
+        )
 
     print("Saving to {}".format(os.getcwd()))
     video = VideoRecorder(dir_name=save_path)
@@ -53,7 +111,8 @@ def main(cfg):
     # init datasets
     dataset = hydra.utils.instantiate(cfg.dataset)
     encoder = hydra.utils.instantiate(cfg.encoder)
-    encoder = encoder.to(cfg.device).eval()
+    # encoder = encoder.to(cfg.device).eval()
+    encoder = accelerator.prepare(encoder)
 
     for param in encoder.parameters():
         param.requires_grad = False
@@ -75,7 +134,23 @@ def main(cfg):
     if cfg.load_path: # TODO: not checked for diffusion 
         cbet_model.load_model(Path(cfg.load_path))
         optimizer = cbet_model.optim
+    else:
+        optimizer = cbet_model.configure_optimizers(
+            weight_decay=cfg.optim.weight_decay,
+            learning_rate=cfg.optim.lr,
+            betas=cfg.optim.betas,
+        )
+    
+    cbet_model, optimizer = accelerator.prepare(cbet_model, optimizer)
 
+    # No need to create directory or wait - Hydra already set up the working directory
+    accelerator.wait_for_everyone()
+    
+    print("Saving to {}".format(os.getcwd()))
+    video = VideoRecorder(dir_name=save_path)
+
+    # init datasets
+    dataset = hydra.utils.instantiate(cfg.dataset)
     train_data, test_data = split_traj_datasets(
         dataset,
         train_fraction=cfg.train_fraction,
@@ -97,15 +172,21 @@ def main(cfg):
         "future_seq_len": cfg.data.future_seq_len,
         "use_libero_goal": use_libero_goal,
     }
+
     train_data = TrajectorySlicerDataset(train_data, **traj_slicer_kwargs)
     test_data = TrajectorySlicerDataset(test_data, **traj_slicer_kwargs)
     train_loader = torch.utils.data.DataLoader(
-        train_data, batch_size=cfg.batch_size, shuffle=True, pin_memory=False
+        train_data, batch_size=cfg.gpu_batch_size, shuffle=True, pin_memory=False
     )
     test_loader = torch.utils.data.DataLoader(
-        test_data, batch_size=cfg.batch_size, shuffle=False, pin_memory=False
+        test_data, batch_size=cfg.gpu_batch_size, shuffle=False, pin_memory=False
     )
+    log.info(f"dataloader batch size: {cfg.gpu_batch_size}")
 
+    train_loader = accelerator.prepare(train_loader)
+    test_loader = accelerator.prepare(test_loader)
+
+    # import pdb; pdb.set_trace()
     env = hydra.utils.instantiate(cfg.env.gym)
     if "use_libero_goal" in cfg.data:
         with torch.no_grad():
@@ -236,12 +317,18 @@ def main(cfg):
     metrics_history = []
     reward_history = []
 
-    # cbet_model.save_model(save_path)
-    torch.save(cbet_model, "{}/model_{}.pt".format(save_path, "init"))
+    if accelerator.is_main_process:
+        print("cbet_model type", type(cbet_model))
+        if hasattr(cbet_model, "module"):
+            cbet_model_raw = accelerator.unwrap_model(cbet_model)
+            torch.save(cbet_model_raw, "{}/model_{}.pt".format(save_path, "init"))
+        else:
+            torch.save(cbet_model, "{}/model_{}.pt".format(save_path, "init"))
 
     for epoch in tqdm.trange(cfg.epochs):
+        accelerator.wait_for_everyone()
         cbet_model.eval()
-        if epoch % cfg.eval_on_env_freq == 0:
+        if epoch % cfg.eval_on_env_freq == 0: 
             avg_reward, completion_id_list, max_coverage, final_coverage = eval_on_env(
                 cfg,
                 videorecorder=video,
@@ -251,7 +338,8 @@ def main(cfg):
             reward_history.append(avg_reward)
             with open("{}/completion_idx_{}.json".format(save_path, epoch), "wb") as fp:
                 pickle.dump(completion_id_list, fp)
-            wandb.log({"eval_on_env": avg_reward})
+            if accelerator.is_main_process:
+                wandb.log({"eval_on_env": avg_reward})
             if cfg.env.gym.id in ["pusht", "blockpush"]:
                 metric_final = (
                     "final coverage" if cfg.env.gym.id == "pusht" else "entered"
@@ -265,8 +353,17 @@ def main(cfg):
                     f"{metric_max} max": max(max_coverage),
                     f"{metric_max} min": min(max_coverage),
                 }
-                wandb.log(metrics)
+                if accelerator.is_main_process:
+                    wandb.log(metrics)
                 metrics_history.append(metrics)
+            
+            # Synchronize all processes after eval_on_env with extended timeout
+            logger.info(f"Process {accelerator.local_process_index} finished eval_on_env, waiting for others...")
+            if torch.distributed.is_initialized():
+                torch.distributed.barrier()
+            else:
+                accelerator.wait_for_everyone()
+            logger.info(f"Process {accelerator.local_process_index} synchronized after eval_on_env")
 
         if epoch % cfg.eval_freq == 0:
             total_loss = 0
@@ -283,22 +380,25 @@ def main(cfg):
                     obs = einops.rearrange(obs, "N T V P E -> N T (V P) E") # keep the patch dim
                     goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
                     predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
+                    # TODO: gather_for_metrics
                     total_loss += loss.item()
-                    wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
+                    if accelerator.is_main_process:
+                        wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
                     if not use_diffusion:
                         action_diff += loss_dict["action_diff"]
                         action_diff_tot += loss_dict["action_diff_tot"]
                         action_diff_mean_res1 += loss_dict["action_diff_mean_res1"]
                         action_diff_mean_res2 += loss_dict["action_diff_mean_res2"]
                         action_diff_max += loss_dict["action_diff_max"]
-            print(f"Test loss: {total_loss / len(test_loader)}")
-            if not use_diffusion:
+            print(f"Test loss: {total_loss / len(test_loader)}") 
+            if accelerator.is_main_process and not use_diffusion:
                 wandb.log({"eval/epoch_wise_action_diff": action_diff})
                 wandb.log({"eval/epoch_wise_action_diff_tot": action_diff_tot})
                 wandb.log({"eval/epoch_wise_action_diff_mean_res1": action_diff_mean_res1})
                 wandb.log({"eval/epoch_wise_action_diff_mean_res2": action_diff_mean_res2})
                 wandb.log({"eval/epoch_wise_action_diff_max": action_diff_max})
 
+        accelerator.wait_for_everyone()
         cbet_model.train()
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
@@ -306,18 +406,27 @@ def main(cfg):
             obs = einops.rearrange(obs, "N T V P E -> N T (V P) E")
             goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
-            wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
-            loss.backward()
+            accelerator.backward(loss)
             optimizer.step()
 
             if use_diffusion:
-                cbet_model.ema_step()
+                if hasattr(cbet_model, "module"):
+                    cbet_model_raw = accelerator.unwrap_model(cbet_model)
+                    cbet_model_raw.ema_step()
+                else:
+                    cbet_model.ema_step()
 
+            if accelerator.is_main_process:
+                wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
+        
         # save model
-        if epoch % cfg.save_every == 0:
-            # cbet_model.save_model(save_path)
-            torch.save(cbet_model, "{}/model_{}.pt".format(save_path, epoch))
-
+        if epoch % cfg.save_every == 0 and accelerator.is_main_process:
+            print("cbet_model type", type(cbet_model))
+            if hasattr(cbet_model, "module"):
+                cbet_model_raw = accelerator.unwrap_model(cbet_model)
+                torch.save(cbet_model_raw, "{}/model_{}.pt".format(save_path, epoch))
+            else:
+                torch.save(cbet_model, "{}/model_{}.pt".format(save_path, epoch))
 
     avg_reward, completion_id_list, max_coverage, final_coverage = eval_on_env(
         cfg,
@@ -326,6 +435,15 @@ def main(cfg):
         videorecorder=video,
         epoch=cfg.epochs,
     )
+    
+    # Synchronize all processes after final eval_on_env
+    logger.info(f"Process {accelerator.local_process_index} finished final eval_on_env, waiting for others...")
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+    else:
+        accelerator.wait_for_everyone()
+    logger.info(f"Process {accelerator.local_process_index} synchronized after final eval_on_env")
+    
     reward_history.append(avg_reward)
     if cfg.env.gym.id in ["pusht", "blockpush"]:
         metric_final = "final coverage" if cfg.env.gym.id == "pusht" else "entered"
@@ -338,7 +456,8 @@ def main(cfg):
             f"{metric_max} max": max(max_coverage),
             f"{metric_max} min": min(max_coverage),
         }
-        wandb.log(metrics)
+        if accelerator.is_main_process:
+            wandb.log(metrics)
         metrics_history.append(metrics)
 
     with open("{}/completion_idx_final.json".format(save_path), "wb") as fp:
@@ -351,7 +470,8 @@ def main(cfg):
         final_eval_on_env = max(reward_history)
     elif cfg.env.gym.id == "kitchen-v0":
         final_eval_on_env = avg_reward
-    wandb.log({"final_eval_on_env": final_eval_on_env})
+    if accelerator.is_main_process:
+        wandb.log({"final_eval_on_env": final_eval_on_env})
     return final_eval_on_env
 
 
