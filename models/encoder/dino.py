@@ -38,8 +38,6 @@ class DinoV2Encoder(nn.Module):
         if self.postprocess == 'avg_pool':
             emb = torch.mean(emb, dim=(2)) # (b, v, e)
 
-        if self.postprocess == 'avg_pool':
-            emb = emb.mean(dim=1)
         if self.latent_ndim == 1:
             emb = emb.unsqueeze(2) # dummy patch dim, b v 1 e
         return emb
