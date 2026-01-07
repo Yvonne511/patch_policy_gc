@@ -9,7 +9,7 @@ class DinoV2Encoder(nn.Module):
         super().__init__()
         print("Encoder feature_key:", feature_key)
         self.name = name
-        self.base_model = torch.hub.load("facebookresearch/dinov2", name)
+        self.base_model = torch.hub.load("facebookresearch/dinov2:b48308a", name)
         self.feature_key = feature_key
         self.emb_dim = self.base_model.num_features
         self.output_dim = self.emb_dim # for compatibility
@@ -38,8 +38,6 @@ class DinoV2Encoder(nn.Module):
         if self.postprocess == 'avg_pool':
             emb = torch.mean(emb, dim=(2)) # (b, v, e)
 
-        if self.postprocess == 'avg_pool':
-            emb = emb.mean(dim=1)
         if self.latent_ndim == 1:
             emb = emb.unsqueeze(2) # dummy patch dim, b v 1 e
         return emb

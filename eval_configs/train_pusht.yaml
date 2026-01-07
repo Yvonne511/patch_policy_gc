@@ -5,16 +5,14 @@ defaults:
   - encoder: dino_patch # dino_patch_avg_pool
   - _self_
   - override hydra/launcher: submitit_slurm
-
-ckpt_base_path: /checkpoint/amaia/video/gzhou/exps/patch_policy
   
 hydra:
   run:
-    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
   job:
     chdir: True
   sweep:
-    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
   launcher:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
