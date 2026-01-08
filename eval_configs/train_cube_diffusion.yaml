@@ -1,0 +1,106 @@
+defaults:
+  - env_vars: env_vars
+  # - encoder: cube_dynamo
+  # - encoder: dino_cls
+  - encoder: dino_patch # dino_patch_avg_pool
+  - _self_
+  - override hydra/launcher: submitit_slurm
+  
+hydra:
+  run:
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True
+  sweep:
+    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+    nodes: 1
+    tasks_per_node: 8
+    cpus_per_task: 8
+    mem_gb: 1024
+    gres: "gpu:h100:8"
+    qos: "explore"
+    # qos: "lowest"
+    timeout_min: 5760
+    setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
+            export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
+            "export MASTER_PORT=$(for port in $(shuf -i 30000-65500 -n 20); do if [[ $(netstat -tupln 2>&1 | grep $port | wc -l) -eq 0 ]] ; then echo $port; break; fi; done;)",]
+
+
+seed: 42
+window_size: 2
+goal_window_size: 2
+eval_window_size: 2
+
+batch_size: 32 # TODO: reduce for patch features 
+epochs: 2000
+eval_freq: 10
+eval_on_env_freq: 10
+num_env_evals: 100 # 
+num_final_evals: 100
+num_final_eval_per_goal: 1
+action_window_size: 10
+
+pred_horizon: 10 # Total seq length to predict to roll out
+n_action_steps: 8 # Action steps to roll out
+
+goal_dim: 0
+wandb:
+  project: patch_policy
+  entity: ${env_vars.wandb_entity}
+train_fraction: 0.9
+
+device: cuda
+optim:
+  lr: 1e-4
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+
+env:
+  gym:
+    _target_: envs.cube.cube_env.CubeWrapper
+    task_id: 5
+    id: 'cube'
+    env:
+      _target_: gymnasium.make
+      id: 'cube-double-v1'
+      reward_task_id: 5
+      max_episode_steps: 300
+      mode: 'task'
+  act_dim: 5
+  goal_dim: ${goal_dim}
+  views: 1
+
+dataset:
+  _target_: datasets.cube.CubeDataset
+  data_directory: ${env_vars.datasets.cube}
+
+data:
+  window_size: ${window_size}
+  action_window_size: ${action_window_size}
+  vqbet_get_future_action_chunk: true
+  goal_conditional: future
+  future_seq_len: ${goal_window_size}
+  min_future_sep: ${action_window_size}
+
+save_every: 1
+save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+load_path: null
+
+model:
+  _target_: models.diffusion_policy.diffusion_policy.DiffusionPolicy
+  obs_dim: ${encoder.output_dim}
+  act_dim: ${env.act_dim}
+  goal_dim: ${env.goal_dim}
+  views: ${env.views}
+  obs_horizon: ${window_size}
+  pred_horizon: ${pred_horizon}
+  action_horizon: ${n_action_steps}
+  visual_input: true
+  data_act_scale: 1
+  lr: ${optim.lr}
+  weight_decay: ${optim.weight_decay}
+  use_transform: null
+  n_patches: 256 # number of patches along one dimension (e.g. 16 for 16x16 patches)

@@ -5,4 +5,5 @@ datasets:
     sim_kitchen: ${env_vars.dataset_root}/sim_kitchen_dataset
     libero: ${env_vars.dataset_root}/libero_dataset
     block_push: ${env_vars.dataset_root}/block_push_dataset
+    cube: ${env_vars.dataset_root}/cube_dataset
     your_trajectory_dataset: YOUR_DATASET_PATH
