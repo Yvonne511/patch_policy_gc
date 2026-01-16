@@ -157,12 +157,15 @@ def main(cfg):
         random_seed=cfg.seed,
     )
     use_libero_goal = cfg.data.get("use_libero_goal", False)
-    train_data = TrajectoryEmbeddingDataset(
-        encoder, train_data, device='cpu', embed_goal=use_libero_goal
-    )
-    test_data = TrajectoryEmbeddingDataset(
-        encoder, test_data, device='cpu', embed_goal=use_libero_goal
-    )
+
+    precompute_embeddings = cfg.get("precompute_embeddings", True)
+    if precompute_embeddings:
+        train_data = TrajectoryEmbeddingDataset(
+            encoder, train_data, device='cpu', embed_goal=use_libero_goal
+        )
+        test_data = TrajectoryEmbeddingDataset(
+            encoder, test_data, device='cpu', embed_goal=use_libero_goal
+        )
     traj_slicer_kwargs = {
         "window": cfg.data.window_size,
         "action_window": cfg.data.action_window_size,
@@ -375,6 +378,10 @@ def main(cfg):
             with torch.no_grad():
                 for data in test_loader:
                     obs, act, goal = (x.to(cfg.device) for x in data)
+                    if not precompute_embeddings:
+                        obs = encoder(obs)  # N T V P E
+                        if use_libero_goal:
+                            goal = encoder(goal)  # N T V P E
                     assert obs.ndim == 5, "expect N T V P E for obs"
                     assert goal.ndim == 5, "expect N T V P E for goals"
                     obs = einops.rearrange(obs, "N T V P E -> N T (V P) E") # keep the patch dim
@@ -404,6 +411,10 @@ def main(cfg):
         for data in tqdm.tqdm(train_loader):
             optimizer.zero_grad()
             obs, act, goal = (x.to(cfg.device) for x in data)
+            if not precompute_embeddings:
+                obs = encoder(obs)  # N T V P E
+                if use_libero_goal:
+                    goal = encoder(goal)  # N T V P E
             obs = einops.rearrange(obs, "N T V P E -> N T (V P) E")
             goal = einops.rearrange(goal, "N T V P E -> N T (V P) E")
             predicted_act, loss, loss_dict = cbet_model(obs, goal, act)
@@ -420,7 +431,7 @@ def main(cfg):
 
             if accelerator.is_main_process:
                 wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
-                
+
         print(f"Train loss: {train_loss / len(train_loader)}")
 
         # save model

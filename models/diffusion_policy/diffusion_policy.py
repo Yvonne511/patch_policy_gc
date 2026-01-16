@@ -822,7 +822,7 @@ class DiffusionPolicy(nn.Module):
         # pad time windows if needed (repeat first time-step's patch block)
         if T_obs < self.obs_horizon:
             missing_time = self.obs_horizon - T_obs
-            pad_tokens = obs_seq[:, 0].repeat(1, missing_time, 1, 1)
+            pad_tokens = obs_seq[:, 0:1].repeat(1, missing_time, 1, 1)
             obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
 
         # handle goal stacking here
@@ -882,7 +882,7 @@ class DiffusionPolicy(nn.Module):
         # pad time windows if needed (repeat first time-step's patch block)
         if T_obs < self.obs_horizon:
             missing_time = self.obs_horizon - T_obs
-            pad_tokens = obs_seq[:, 0].repeat(1, missing_time, 1, 1)
+            pad_tokens = obs_seq[:, 0:1].repeat(1, missing_time, 1, 1)
             obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
 
         # handle goal stacking here

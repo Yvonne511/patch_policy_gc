@@ -29,15 +29,25 @@ class DinoV2Encoder(nn.Module):
                 self.latent_ndim = 1
 
     def forward(self, x):
-        b, v, c, h, w = x.shape
-        x = x.reshape(b * v, c, h, w)
+        # Accept arbitrary number of leading dimensions before (C, H, W)
+        # and preserve them on return.
+        # Example: input shape (...prefix, C, H, W)
+        prefix_shape = x.shape[:-3]
+        c, h, w = x.shape[-3:]
+
+        # Collapse all leading dims into a single batch dimension for the base model
+        prod_prefix = 1
+        for d in prefix_shape:
+            prod_prefix *= d
+        x = x.reshape(prod_prefix, c, h, w)
 
         emb = self.base_model.forward_features(x)[self.feature_key]
-        emb = einops.rearrange(emb, '(b v) ... -> b v ...', b=b) # b v p e
+        emb = emb.reshape(*prefix_shape, *emb.shape[1:])
 
         if self.postprocess == 'avg_pool':
-            emb = torch.mean(emb, dim=(2)) # (b, v, e)
+            emb = torch.mean(emb, dim=-2)  # (...prefix, E)
 
         if self.latent_ndim == 1:
-            emb = emb.unsqueeze(2) # dummy patch dim, b v 1 e
+            emb = emb.unsqueeze(len(prefix_shape))
+
         return emb
