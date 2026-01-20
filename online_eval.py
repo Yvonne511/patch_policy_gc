@@ -305,7 +305,7 @@ def main(cfg):
                     env.env._seed += 1
                     avg_max_coverage.append(info["max_coverage"])
                     avg_final_coverage.append(info["final_coverage"])
-                elif cfg.env.gym.id == "blockpush":
+                elif cfg.env.gym.id == "blockpush" or cfg.env.gym.id == "cube":
                     avg_max_coverage.append(info["moved"])
                     avg_final_coverage.append(info["entered"])
                 completion_id_list.append(info["all_completions_ids"])
@@ -343,7 +343,7 @@ def main(cfg):
                 pickle.dump(completion_id_list, fp)
             if accelerator.is_main_process:
                 wandb.log({"eval_on_env": avg_reward})
-            if cfg.env.gym.id in ["pusht", "blockpush"]:
+            if cfg.env.gym.id in ["pusht", "blockpush", "cube"]:
                 metric_final = (
                     "final coverage" if cfg.env.gym.id == "pusht" else "entered"
                 )
@@ -460,7 +460,7 @@ def main(cfg):
     logger.info(f"Process {accelerator.local_process_index} synchronized after final eval_on_env")
     
     reward_history.append(avg_reward)
-    if cfg.env.gym.id in ["pusht", "blockpush"]:
+    if cfg.env.gym.id in ["pusht", "blockpush", "cube"]:
         metric_final = "final coverage" if cfg.env.gym.id == "pusht" else "entered"
         metric_max = "max coverage" if cfg.env.gym.id == "pusht" else "moved"
         metrics = {
@@ -479,7 +479,7 @@ def main(cfg):
         pickle.dump(completion_id_list, fp)
     if cfg.env.gym.id == "pusht":
         final_eval_on_env = max([x["final coverage mean"] for x in metrics_history])
-    elif cfg.env.gym.id == "blockpush":
+    elif cfg.env.gym.id == "blockpush" or cfg.env.gym.id == "cube":
         final_eval_on_env = max([x["entered mean"] for x in metrics_history])
     elif cfg.env.gym.id == "libero_goal":
         final_eval_on_env = max(reward_history)
