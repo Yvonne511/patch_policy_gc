@@ -1,9 +1,9 @@
 defaults:
   - env_vars: env_vars
-  # - encoder: pusht_dynamo
+  - encoder: pusht_dynamo
   # - encoder: dino_cls
   # - encoder: dino_patch # dino_patch_avg_pool
-  - encoder: resnet18_random
+  # - encoder: resnet18_random
   - _self_
   - override hydra/launcher: submitit_slurm
   
@@ -35,13 +35,13 @@ window_size: 5
 goal_window_size: 5
 eval_window_size: 5
 
-batch_size: 16
-epochs: 5000
+batch_size: 64
+epochs: 600
 eval_freq: 10
-eval_on_env_freq: 10
-num_env_evals: 100 # 
+eval_on_env_freq: 100
+num_env_evals: 100
+num_envs: 10
 num_final_evals: 100
-num_final_eval_per_goal: 1
 action_window_size: 5
 
 goal_dim: 0
@@ -83,6 +83,16 @@ save_every: 1
 save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 load_path: null
 
+ckpt_base_path: ${env_vars.save_path}
+hydra:
+  run:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True
+  sweep:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+
 model:
   _target_: models.vq_behavior_transformer.bet.BehaviorTransformer
   obs_dim: ${encoder.output_dim}
@@ -92,7 +102,7 @@ model:
   vqvae_n_embed: 16
   vqvae_groups: 2
   views: ${env.views}
-  n_patches: 256 # TODO
+  n_patches: 1 # TODO
   vqvae_fit_steps: 44
   vqvae_iters: 1000
   n_layer: 8

@@ -16,12 +16,10 @@ from utils.video import VideoRecorder
 import pickle
 from datasets.core import TrajectoryEmbeddingDataset, split_traj_datasets
 from datasets.vqbet_repro import TrajectorySlicerDataset
-
+from envs.venv import SubprocVectorEnv
 from utils.normalizer import LinearNormalizer
-
 from datetime import timedelta, datetime
 from accelerate import Accelerator
-# from accelerate.logging import get_logger
 import logging
 from accelerate import InitProcessGroupKwargs, DistributedDataParallelKwargs
 from hydra.core.hydra_config import HydraConfig
@@ -189,8 +187,8 @@ def main(cfg):
     train_loader = accelerator.prepare(train_loader)
     test_loader = accelerator.prepare(test_loader)
 
-    # import pdb; pdb.set_trace()
-    env = hydra.utils.instantiate(cfg.env.gym)
+    env_fn = lambda: hydra.utils.instantiate(cfg.env.gym)
+    env = SubprocVectorEnv([env_fn for _ in range(cfg.num_envs)])
     if "use_libero_goal" in cfg.data:
         with torch.no_grad():
             # calculate goal embeddings for each task
@@ -217,101 +215,96 @@ def main(cfg):
     def eval_on_env(
         cfg,
         num_evals=cfg.num_env_evals,
-        num_eval_per_goal=1,
         videorecorder=None,
         epoch=None,
     ):
         def embed(enc, obs):
-            # import pdb; pdb.set_trace()
-            obs = (
-                torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0).to(cfg.device)
-            )  # 1 V C H W
-            result = enc(obs)
-            # import pdb; pdb.set_trace()
-            # result = einops.rearrange(result, "1 V E -> (V E)")
-            result = einops.rearrange(result, "1 V P E -> (V P) E") # don't flatten patch dim
-            return result
+            obs = torch.as_tensor(obs, dtype=torch.float32, device=cfg.device)  # N V C H W
+            return einops.rearrange(enc(obs), "N V P E -> N (V P) E")
+        assert num_evals % cfg.num_envs == 0, "num_evals must be multiple of num_envs"
 
         avg_reward = 0
         action_list = []
         completion_id_list = []
         avg_max_coverage = []
         avg_final_coverage = []
-        env.seed(cfg.seed)
-        for goal_idx in range(num_evals):
+        env.seed([cfg.seed + i for i in range(cfg.num_envs)])
+        num_batches = num_evals // cfg.num_envs
+        for goal_idx in range(num_batches):
             if videorecorder is not None:
                 videorecorder.init(enabled=True)
-            for i in range(num_eval_per_goal):
-                obs_stack = deque(maxlen=cfg.eval_window_size)
-                this_obs = env.reset(goal_idx=goal_idx)  # V C H W
-                print("Eval on goal {}/{}, episode {}/{}".format(goal_idx, num_evals, i, num_eval_per_goal))
-                assert (
-                    this_obs.min() >= 0 and this_obs.max() <= 1
-                ), "expect 0-1 range observation"
-                this_obs_enc = embed(encoder, this_obs) # V P E
-                obs_stack.append(this_obs_enc)
-                done, step, total_reward = False, 0, 0
-                goal = goal_fn(goal_idx)  # V C H W
-                while not done:
-                    obs = torch.stack(tuple(obs_stack)).float().to(cfg.device) # T V P E
-                    goal = torch.as_tensor(goal, dtype=torch.float32, device=cfg.device)
-                    # goal = embed(encoder, goal)
-                    goal = einops.repeat(goal, '... -> t ...', t=cfg.eval_window_size)
-                    action, _, _ = cbet_model(obs.unsqueeze(0), goal.unsqueeze(0), None)
-                    action = action[0]  # remove batch dim; always 1
-
-                    if use_diffusion: # DP inference
-                        for i in range(len(action)):
-                            exec_action = action[i].cpu().detach().numpy()
-                            obs, reward, done, info = env.step(exec_action)
-                            obs_stack.append(embed(encoder, obs))
-                            total_reward += reward
-                            if videorecorder.enabled:
-                                videorecorder.record(info["image"])
-                            step += 1
-                            if done:
-                                break
-                    else: # vqbet inference
-                        if cfg.action_window_size > 1:
-                            action_list.append(action[-1].cpu().detach().numpy())
-                            if len(action_list) > cfg.action_window_size:
-                                action_list = action_list[1:]
-                            curr_action = np.array(action_list)
-                            curr_action = (
-                                np.sum(curr_action, axis=0)[0] / curr_action.shape[0]
-                            )
-                            new_action_list = []
-                            for a_chunk in action_list:
-                                new_action_list.append(
-                                    np.concatenate(
-                                        (a_chunk[1:], np.zeros((1, a_chunk.shape[1])))
-                                    )
+            obs_stack = deque(maxlen=cfg.eval_window_size)
+            this_obs = env.reset(goal_idx=goal_idx)  # N V C H W
+            print(f"Eval on goal {goal_idx}/{num_batches}, {cfg.num_envs} episodes")
+            assert (
+                this_obs.min() >= 0 and this_obs.max() <= 1
+            ), "expect 0-1 range observation"
+            this_obs_enc = embed(encoder, this_obs)  # N (V P) E. from now on V is folded into P
+            obs_stack.append(this_obs_enc)
+            done, total_reward = np.array([False]), 0
+            goal = goal_fn(goal_idx)  # V C H W
+            # TODO: replace done with a horizon. This assumes all envs are done at the same time
+            while not done.all():
+                obs = torch.stack(tuple(obs_stack)).float().to(cfg.device)
+                obs = einops.rearrange(obs, "T N P E -> N T P E")
+                goal = torch.as_tensor(goal, dtype=torch.float32, device=cfg.device)
+                # goal = embed(encoder, goal)
+                goal = einops.repeat(goal, '... -> N T ...', N=cfg.num_envs, T=cfg.eval_window_size)
+                action, _, _ = cbet_model(obs, goal, None)
+                # action was T, Chunk, Action_dim for single env
+                # now it's N, T, C, A for vector env
+                if use_diffusion:
+                    for t in range(action.shape[1]):
+                        exec_action = action[:, t].cpu().detach().numpy()
+                        this_obs, reward, done, info = env.step(exec_action)
+                        obs_stack.append(embed(encoder, this_obs))
+                        if videorecorder.enabled:
+                            videorecorder.record(info[0]["image"])
+                        total_reward += reward.sum()
+                        goal = goal_fn(goal_idx)
+                        if done.all():
+                            break
+                else:
+                    if cfg.action_window_size > 1:
+                        action_list.append(action[:, -1].cpu().detach().numpy())
+                        if len(action_list) > cfg.action_window_size:
+                            action_list = action_list[1:]
+                        curr_action = np.array(action_list)  # W, N, C, A
+                        curr_action = curr_action.mean(axis=0)[:, 0]  # N, A
+                        new_action_list = []
+                        for a_chunk in action_list:
+                            new_action_list.append(
+                                np.concatenate(
+                                    (a_chunk[:, 1:], np.zeros((a_chunk.shape[0], 1, a_chunk.shape[-1]))), axis=1
                                 )
-                            action_list = new_action_list
-                        else:
-                            curr_action = action[-1, 0, :].cpu().detach().numpy()
+                            )
+                            # ! better but not tested yet:
+                            # new_action_list.append(np.roll(a_chunk, -1, axis=1))
+                        action_list = new_action_list
+                    else:
+                        curr_action = action[:, -1, 0, :].cpu().detach().numpy()
 
                         this_obs, reward, done, info = env.step(curr_action)
                         this_obs_enc = embed(encoder, this_obs)
                         obs_stack.append(this_obs_enc)
 
-                        if videorecorder.enabled:
-                            videorecorder.record(info["image"])
-                        step += 1
-                        total_reward += reward
-                    goal = goal_fn(goal_idx)
-                avg_reward += total_reward
-                if cfg.env.gym.id == "pusht":
-                    env.env._seed += 1
-                    avg_max_coverage.append(info["max_coverage"])
-                    avg_final_coverage.append(info["final_coverage"])
-                elif cfg.env.gym.id == "blockpush" or cfg.env.gym.id == "cube":
-                    avg_max_coverage.append(info["moved"])
-                    avg_final_coverage.append(info["entered"])
-                completion_id_list.append(info["all_completions_ids"])
+                if videorecorder.enabled:
+                    videorecorder.record(info[0]["image"])
+                total_reward += reward.sum()
+                goal = goal_fn(goal_idx)
+            avg_reward += total_reward
+            if cfg.env.gym.id == "pusht":
+                base_seed = cfg.seed + goal_idx * cfg.num_envs
+                env.seed([base_seed + j for j in range(cfg.num_envs)])
+                avg_max_coverage += [info[i]["max_coverage"] for i in range(len(info))]
+                avg_final_coverage += [info[i]["final_coverage"] for i in range(len(info))]
+            elif cfg.env.gym.id in ["blockpush", "cube"]:
+                avg_max_coverage += [info[i]["moved"] for i in range(len(info))]
+                avg_final_coverage += [info[i]["entered"] for i in range(len(info))]
+            completion_id_list += [info[i]["all_completions_ids"] for i in range(len(info))]
             videorecorder.save("eval_{}_{}.mp4".format(epoch, goal_idx))
         return (
-            avg_reward / (num_evals * num_eval_per_goal),
+            avg_reward / num_evals,
             completion_id_list,
             avg_max_coverage,
             avg_final_coverage,
@@ -336,7 +329,6 @@ def main(cfg):
                 cfg,
                 videorecorder=video,
                 epoch=epoch,
-                num_eval_per_goal=cfg.num_final_eval_per_goal,
             )
             reward_history.append(avg_reward)
             with open("{}/completion_idx_{}.json".format(save_path, epoch), "wb") as fp:
@@ -446,7 +438,6 @@ def main(cfg):
     avg_reward, completion_id_list, max_coverage, final_coverage = eval_on_env(
         cfg,
         num_evals=cfg.num_final_evals,
-        num_eval_per_goal=cfg.num_final_eval_per_goal,
         videorecorder=video,
         epoch=cfg.epochs,
     )

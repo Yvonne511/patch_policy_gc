@@ -8,7 +8,6 @@ argon2-cffi-bindings==21.2.0
 asttokens==2.2.1
 async-lru==2.0.4
 attrs==23.1.0
-av==10.0.0
 babel==2.12.1
 backcall==0.2.0
 bddl==3.5.0
