@@ -95,7 +95,7 @@ model:
   n_layer: 6
   n_head: 6
   n_embd: 120
-  n_patches: 1
+  n_patches: ${encoder.n_patches}
   vqvae_batch_size: 1024
   act_scale: 1
   obs_window_size: ${window_size}

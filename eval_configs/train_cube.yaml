@@ -40,7 +40,7 @@ eval_freq: 10
 eval_on_env_freq: 10
 num_env_evals: 100 # 
 num_final_evals: 100
-num_final_eval_per_goal: 1
+num_envs: 10
 action_window_size: 5
 
 goal_dim: 0
@@ -95,7 +95,7 @@ model:
   vqvae_n_embed: 16
   vqvae_groups: 2
   views: ${env.views}
-  n_patches: 256 # TODO
+  n_patches: ${encoder.n_patches}
   vqvae_fit_steps: 44
   vqvae_iters: 1000
   n_layer: 8

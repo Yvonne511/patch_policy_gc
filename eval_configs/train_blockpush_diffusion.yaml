@@ -37,8 +37,8 @@ epochs: 2000
 eval_freq: 10
 eval_on_env_freq: 10
 num_env_evals: 100 # 
+num_envs: 10
 num_final_evals: 100
-num_final_eval_per_goal: 1
 action_window_size: 6
 
 pred_horizon: 6 # Total seq length to predict to roll out
@@ -97,4 +97,4 @@ model:
   lr: ${optim.lr}
   weight_decay: ${optim.weight_decay}
   use_transform: null
-  n_patches: 256 # number of patches along one dimension (e.g. 16 for 16x16 patches)
+  n_patches: ${encoder.n_patches} # number of patches along one dimension (e.g. 16 for 16x16 patches)

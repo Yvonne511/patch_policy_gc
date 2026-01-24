@@ -284,9 +284,9 @@ def main(cfg):
                     else:
                         curr_action = action[:, -1, 0, :].cpu().detach().numpy()
 
-                        this_obs, reward, done, info = env.step(curr_action)
-                        this_obs_enc = embed(encoder, this_obs)
-                        obs_stack.append(this_obs_enc)
+                    this_obs, reward, done, info = env.step(curr_action)
+                    this_obs_enc = embed(encoder, this_obs)
+                    obs_stack.append(this_obs_enc)
 
                 if videorecorder.enabled:
                     videorecorder.record(info[0]["image"])

@@ -5,7 +5,7 @@ import torch.nn as nn
 torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
 
 class DinoV2Encoder(nn.Module):
-    def __init__(self, name, feature_key, output_dim=None, postprocess=None):
+    def __init__(self, name, feature_key, output_dim=None, postprocess=None, n_patches=256):
         super().__init__()
         print("Encoder feature_key:", feature_key)
         self.name = name

@@ -5,7 +5,7 @@ defaults:
   - encoder: dino_patch # dino_patch_avg_pool
   - _self_
   - override hydra/launcher: submitit_slurm
-  
+ 
 hydra:
   run:
     dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
@@ -99,4 +99,4 @@ model:
   lr: ${optim.lr}
   weight_decay: ${optim.weight_decay}
   use_transform: null
-  n_patches: 256 # number of patches along one dimension (e.g. 16 for 16x16 patches)
+  n_patches: ${encoder.n_patches}

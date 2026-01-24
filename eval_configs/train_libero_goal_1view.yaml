@@ -37,9 +37,9 @@ batch_size: 16
 epochs: 50
 eval_freq: 10
 eval_on_env_freq: 1
-num_env_evals: 10
-num_final_evals: 10
-num_final_eval_per_goal: 10
+num_env_evals: 100
+num_final_evals: 100
+num_envs: 10
 action_window_size: 1
 
 wandb:
@@ -88,7 +88,7 @@ model:
   act_dim: ${env.act_dim}
   goal_dim: ${encoder.output_dim}
   views: ${env.views}
-  n_patches: 256 # TODO: may need to double this for multiview
+  n_patches: ${encoder.n_patches}
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2
