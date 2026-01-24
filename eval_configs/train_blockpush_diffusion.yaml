@@ -33,16 +33,18 @@ goal_window_size: 3
 eval_window_size: 3
 
 batch_size: 256 # TODO: reduce for patch features 
-epochs: 2000
-eval_freq: 10
-eval_on_env_freq: 10
-num_env_evals: 100 # 
+epochs: 8000
+eval_freq: 40
+eval_on_env_freq: 400
+num_env_evals: 50 # 
 num_envs: 10
 num_final_evals: 100
-action_window_size: 6
+action_window_size: 3
 
-pred_horizon: 6 # Total seq length to predict to roll out
+pred_horizon: 3 # Total seq length to predict to roll out
 n_action_steps: 3 # Action steps to roll out
+
+precompute_embeddings: True
 
 goal_dim: 0
 train_fraction: 0.9

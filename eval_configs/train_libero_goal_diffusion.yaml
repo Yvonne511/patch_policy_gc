@@ -43,6 +43,8 @@ action_window_size: 10
 pred_horizon: 10 # Total seq length to predict to roll out
 n_action_steps: 8 # Action steps to roll out
 
+precompute_embeddings: True
+
 # TODO: is this used??
 # goal_dim: 0
 

@@ -43,6 +43,8 @@ num_final_evals: 100
 num_envs: 10
 action_window_size: 5
 
+precompute_embeddings: True
+
 goal_dim: 0
 wandb:
   project: patch_policy

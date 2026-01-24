@@ -40,6 +40,8 @@ num_envs: 10
 num_final_evals: 100
 action_window_size: 1
 
+precompute_embeddings: True
+
 wandb:
   project: patch_policy
   entity: ${env_vars.wandb_entity}
