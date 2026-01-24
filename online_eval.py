@@ -424,6 +424,8 @@ def main(cfg):
             if accelerator.is_main_process:
                 wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
 
+        if hasattr(cbet_model, "finish_epoch"):
+            cbet_model.finish_epoch()
         print(f"Train loss: {train_loss / len(train_loader)}")
 
         # save model
