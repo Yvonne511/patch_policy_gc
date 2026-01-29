@@ -130,8 +130,12 @@ def main(cfg):
         cbet_model.set_normalizer(action_normalizer)
 
     if cfg.load_path: # TODO: not checked for diffusion 
-        cbet_model.load_model(Path(cfg.load_path))
-        optimizer = cbet_model.optim
+        print(f"Loading model from {cfg.load_path} ...")
+        if not use_diffusion:
+            cbet_model.load_model(Path(cfg.load_path))
+            optimizer = cbet_model.optim
+        else:
+            cbet_model = torch.load(cfg.load_path).to(cfg.device)
     else:
         optimizer = cbet_model.configure_optimizers(
             weight_decay=cfg.optim.weight_decay,
@@ -288,9 +292,9 @@ def main(cfg):
                     this_obs_enc = embed(encoder, this_obs)
                     obs_stack.append(this_obs_enc)
 
-                if videorecorder.enabled:
-                    videorecorder.record(info[0]["image"])
-                total_reward += reward.sum()
+                    if videorecorder.enabled:
+                        videorecorder.record(info[0]["image"])
+                    total_reward += reward.sum()
                 goal = goal_fn(goal_idx)
             avg_reward += total_reward
             if cfg.env.gym.id == "pusht":
