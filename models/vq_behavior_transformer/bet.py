@@ -66,6 +66,7 @@ class BehaviorTransformer(nn.Module):
         vqvae_latent_dim: int,
         vqvae_n_embed: int,
         vqvae_groups: int,
+        vqvae_fit_steps: int,
         vqvae_iters: int,
         n_patches: int,
         n_layer: int,
@@ -80,7 +81,6 @@ class BehaviorTransformer(nn.Module):
         gamma: float = 2.0,
         obs_window_size: int = 10,
         act_window_size: int = 10,
-        vqvae_fit_steps: Optional[int] = None,
     ):
         super().__init__()
         self.GOAL_SPEC = ["concat", "stack", "unconditional"]
@@ -106,13 +106,11 @@ class BehaviorTransformer(nn.Module):
             )
         )
 
-        # if vqvae_fit_steps is None, then vqvae is fit on the first finish_epoch call.
-        # else, it's fit after vqvae_fit_steps batches of actions are collected.
+        # the first n batches of actions are collected for VQ training.
         self.vqvae_fit_steps = vqvae_fit_steps
         self.vqvae_iters = vqvae_iters
         self.vqvae_batch_size = vqvae_batch_size
         self.vqvae_is_fit = False
-        self.first_epoch = True 
         self._vqvae_model = VqVae(
             input_dim_h=act_window_size,
             input_dim_w=act_dim, 
@@ -161,19 +159,8 @@ class BehaviorTransformer(nn.Module):
         return result
 
     def _maybe_fit_vq(self):
-        if self.vqvae_fit_steps is None:
-            return
         if self.vqvae_is_fit or len(self._collected_actions) < self.vqvae_fit_steps:
             return
-        self._fit_vq()
-
-    def finish_epoch(self):
-        if self.first_epoch and self.vqvae_fit_steps is None:
-            self._fit_vq()
-        self.first_epoch = False
-
-    def _fit_vq(self):
-        print("Fitting VQVAE")
         all_actions = torch.cat(self._collected_actions)
         all_actions = einops.rearrange(all_actions, "N T W A -> (N T) (W A)")
         # only train on unique actions
@@ -219,7 +206,11 @@ class BehaviorTransformer(nn.Module):
         goal_seq: Optional[torch.Tensor],
         action_seq: Optional[torch.Tensor],
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Dict[str, float]]:
-        if action_seq is not None and self.training and not self.vqvae_is_fit:
+        if (
+            (action_seq is not None)
+            and (len(self._collected_actions) < self.vqvae_fit_steps)
+            and (self.training)
+        ):
             action_seq_all = accelerator.gather(action_seq)
             self._collected_actions.append(self._unpack_actions(action_seq_all))
             self._maybe_fit_vq()
