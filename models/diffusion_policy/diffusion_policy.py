@@ -908,9 +908,10 @@ class DiffusionPolicy(nn.Module):
 
         naction = naction.detach()
         action_pred = self.unnormalize_data(naction)
-        start = self.obs_horizon - 1
-        end = start + self.action_horizon
-        action = action_pred[:, start:end, :]
+        # start = self.obs_horizon - 1
+        # end = start + self.action_horizon
+        # action = action_pred[:, start:end, :]
+        action = action_pred[:, :self.action_horizon, :]
         return action, None, None
 
     def ema_step(self):
