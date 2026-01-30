@@ -40,7 +40,7 @@ eval_on_env_freq: 10
 num_env_evals: 100 # 
 num_envs: 10
 num_final_evals: 100
-action_window_size: 10
+action_window_size: 3
 
 pred_horizon: ${action_window_size} # Total seq length to predict to roll out
 n_action_steps: ${action_window_size} # Action steps to roll out
