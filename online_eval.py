@@ -338,7 +338,7 @@ def main(cfg):
             with open("{}/completion_idx_{}.json".format(save_path, epoch), "wb") as fp:
                 pickle.dump(completion_id_list, fp)
             if accelerator.is_main_process:
-                wandb.log({"eval_on_env": avg_reward})
+                wandb.log({"eval_on_env": avg_reward, "epoch": epoch})
             if cfg.env.gym.id in ["pusht", "blockpush", "cube"]:
                 metric_final = (
                     "final coverage" if cfg.env.gym.id == "pusht" else "entered"
@@ -353,7 +353,7 @@ def main(cfg):
                     f"{metric_max} min": min(max_coverage),
                 }
                 if accelerator.is_main_process:
-                    wandb.log(metrics)
+                    wandb.log({**metrics, "epoch": epoch})
                 metrics_history.append(metrics)
             
             # Synchronize all processes after eval_on_env with extended timeout
@@ -386,7 +386,7 @@ def main(cfg):
                     # TODO: gather_for_metrics
                     total_loss += loss.item()
                     if accelerator.is_main_process:
-                        wandb.log({"eval/{}".format(x): y for (x, y) in loss_dict.items()})
+                        wandb.log({**{"eval/{}".format(x): y for (x, y) in loss_dict.items()}, "epoch": epoch})
                     if not use_diffusion:
                         action_diff += loss_dict["action_diff"]
                         action_diff_tot += loss_dict["action_diff_tot"]
@@ -395,11 +395,11 @@ def main(cfg):
                         action_diff_max += loss_dict["action_diff_max"]
             print(f"Test loss: {total_loss / len(test_loader)}") 
             if accelerator.is_main_process and not use_diffusion:
-                wandb.log({"eval/epoch_wise_action_diff": action_diff})
-                wandb.log({"eval/epoch_wise_action_diff_tot": action_diff_tot})
-                wandb.log({"eval/epoch_wise_action_diff_mean_res1": action_diff_mean_res1})
-                wandb.log({"eval/epoch_wise_action_diff_mean_res2": action_diff_mean_res2})
-                wandb.log({"eval/epoch_wise_action_diff_max": action_diff_max})
+                wandb.log({"eval/epoch_wise_action_diff": action_diff, "epoch": epoch})
+                wandb.log({"eval/epoch_wise_action_diff_tot": action_diff_tot, "epoch": epoch})
+                wandb.log({"eval/epoch_wise_action_diff_mean_res1": action_diff_mean_res1, "epoch": epoch})
+                wandb.log({"eval/epoch_wise_action_diff_mean_res2": action_diff_mean_res2, "epoch": epoch})
+                wandb.log({"eval/epoch_wise_action_diff_max": action_diff_max, "epoch": epoch})
 
         accelerator.wait_for_everyone()
         cbet_model.train()
@@ -426,7 +426,7 @@ def main(cfg):
                     cbet_model.ema_step()
 
             if accelerator.is_main_process:
-                wandb.log({"train/{}".format(x): y for (x, y) in loss_dict.items()})
+                wandb.log({**{"train/{}".format(x): y for (x, y) in loss_dict.items()}, "epoch": epoch})
 
         if hasattr(cbet_model, "finish_epoch"):
             cbet_model.finish_epoch()
@@ -469,7 +469,7 @@ def main(cfg):
             f"{metric_max} min": min(max_coverage),
         }
         if accelerator.is_main_process:
-            wandb.log(metrics)
+            wandb.log({**metrics, "epoch": cfg.epochs})
         metrics_history.append(metrics)
 
     with open("{}/completion_idx_final.json".format(save_path), "wb") as fp:
@@ -483,7 +483,7 @@ def main(cfg):
     elif cfg.env.gym.id == "kitchen-v0":
         final_eval_on_env = avg_reward
     if accelerator.is_main_process:
-        wandb.log({"final_eval_on_env": final_eval_on_env})
+        wandb.log({"final_eval_on_env": final_eval_on_env, "epoch": cfg.epochs})
     return final_eval_on_env
 
 
