@@ -6,7 +6,7 @@ from datasets.core import TrajectoryDataset
 
 
 class SimKitchenTrajectoryDataset(TrajectoryDataset):
-    def __init__(self, data_directory, prefetch=True, onehot_goals=False):
+    def __init__(self, data_directory, prefetch=True, onehot_goals=False, subset_fraction=None):
         self.data_directory = Path(data_directory)
         states = torch.from_numpy(np.load(self.data_directory / "observations_seq.npy"))
         actions = torch.from_numpy(np.load(self.data_directory / "actions_seq.npy"))
@@ -16,6 +16,14 @@ class SimKitchenTrajectoryDataset(TrajectoryDataset):
             states, actions, goals
         )
         self.Ts = np.load(self.data_directory / "existence_mask.npy").sum(axis=0).astype(int).tolist()
+
+        if subset_fraction:
+            assert 0 < subset_fraction <= 1
+            n = int(len(self.Ts) * subset_fraction)
+            self.states = self.states[:n]
+            self.actions = self.actions[:n]
+            self.goals = self.goals[:n]
+            self.Ts = self.Ts[:n]
         
         self.prefetch = prefetch
         if self.prefetch:

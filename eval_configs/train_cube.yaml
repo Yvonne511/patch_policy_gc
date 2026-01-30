@@ -18,11 +18,10 @@ hydra:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
     nodes: 1
     tasks_per_node: 8
-    cpus_per_task: 8
-    mem_gb: 512
-    gres: "gpu:h100:8"
-    qos: "explore"
-    # qos: "lowest"
+    cpus_per_task: 16
+    mem_gb: 1600
+    gres: "gpu:h200:8"
+    qos: "h200_jepa_high" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
     timeout_min: 5760
     setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
             export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
@@ -40,8 +39,10 @@ eval_freq: 10
 eval_on_env_freq: 10
 num_env_evals: 100 # 
 num_final_evals: 100
-num_final_eval_per_goal: 1
+num_envs: 10
 action_window_size: 5
+
+precompute_embeddings: True
 
 goal_dim: 0
 wandb:
@@ -82,7 +83,7 @@ data:
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
 
-save_every: 1
+save_every: 10
 save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 load_path: null
 
@@ -95,7 +96,7 @@ model:
   vqvae_n_embed: 16
   vqvae_groups: 2
   views: ${env.views}
-  n_patches: 256 # TODO
+  n_patches: ${encoder.n_patches}
   vqvae_fit_steps: 44
   vqvae_iters: 1000
   n_layer: 8

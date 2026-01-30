@@ -1,11 +1,12 @@
-save_path: /PATH/TO/SAVE/RESULTS  # e.g. root directory of this repo
-wandb_entity: YOUR_WANDB_ENTITY  # e.g. your wandb username
+save_path: /home_shared/grail_jeff/patch_policy  # e.g. root directory of this repo
+wandb_entity: jeffacce # e.g. your wandb username
 
-dataset_root: /PATH/TO/DATASET/ROOT  # e.g. set this to the unzipped directory of all datasets
+
+dataset_root: /nas/kathy/datasets/dynamo_repro_datasets  # e.g. set this to the unzipped directory of all datasets
 
 datasets:
     pusht: ${env_vars.dataset_root}/pusht_dataset
     sim_kitchen: ${env_vars.dataset_root}/sim_kitchen_dataset
     libero: ${env_vars.dataset_root}/libero_dataset
     block_push: ${env_vars.dataset_root}/block_push_dataset
-    cube: ${env_vars.dataset_root}/cube_dataset
+    cube: ${env_vars.dataset_root}/cube_dataset_v2

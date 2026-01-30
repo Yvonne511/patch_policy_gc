@@ -8,3 +8,5 @@ normalizations:
     - [1, 1, 1]
 
 output_dim: 512
+
+n_patches: 1

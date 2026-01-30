@@ -1,0 +1,4 @@
+_target_: models.encoder.resnet.Resnet18Patches
+pretrained: True
+output_dim: 256
+unit_norm: False

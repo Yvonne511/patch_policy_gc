@@ -192,6 +192,7 @@ class BehaviorTransformer(nn.Module):
         print("n_different_combinations", len(torch.unique(vq_code, dim=0)))
         print("losses", loss_dict)
         self.vqvae_is_fit = True
+        self._collected_actions = []
 
     def train(self, mode=True):
         # if vqvae is already trained, make sure we freeze it

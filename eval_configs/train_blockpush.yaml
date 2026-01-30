@@ -15,11 +15,11 @@ hydra:
   launcher:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
     nodes: 1
-    tasks_per_node: 1
-    cpus_per_task: 16
+    tasks_per_node: 8
+    cpus_per_task: 8
     mem_gb: 1600
-    gres: "gpu:h100:1"
-    qos: "explore"
+    gres: "gpu:h200:8"
+    qos: "h200_core_shared" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
     timeout_min: 5760
     setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
             export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
@@ -35,9 +35,11 @@ epochs: 300
 eval_freq: 10
 eval_on_env_freq: 10
 num_env_evals: 100
+num_envs: 10
 num_final_evals: 100
-num_final_eval_per_goal: 1
 action_window_size: 1
+
+precompute_embeddings: True
 
 goal_dim: 0
 train_fraction: 0.9
@@ -81,7 +83,6 @@ load_path: null
 
 model:
   _target_: models.vq_behavior_transformer.bet.BehaviorTransformer
-  n_patches: 256
   obs_dim: ${encoder.output_dim}
   act_dim: ${env.act_dim}
   goal_dim: ${env.goal_dim}
@@ -94,6 +95,7 @@ model:
   n_layer: 6
   n_head: 6
   n_embd: 120
+  n_patches: ${encoder.n_patches}
   vqvae_batch_size: 1024
   act_scale: 1
   obs_window_size: ${window_size}

@@ -2,32 +2,9 @@ defaults:
   - env_vars: env_vars
   # - encoder: pusht_dynamo
   # - encoder: dino_cls
-  - encoder: dino_patch # dino_patch_avg_pool
-  # - encoder: resnet18_random
+  # - encoder: dino_patch # dino_patch_avg_pool
+  - encoder: resnet18_patch_l3
   - _self_
-  - override hydra/launcher: submitit_slurm
-  
-hydra:
-  run:
-    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  job:
-    chdir: True
-  sweep:
-    dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    subdir: ${hydra.job.num}
-  launcher:
-    submitit_folder: ${hydra.sweep.dir}/.submitit/%j
-    nodes: 1
-    tasks_per_node: 8
-    cpus_per_task: 8
-    mem_gb: 512
-    gres: "gpu:h200:8"
-    qos: "h200_jepa_high" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
-    timeout_min: 5760
-    setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
-            export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
-            "export MASTER_PORT=$(for port in $(shuf -i 30000-65500 -n 20); do if [[ $(netstat -tupln 2>&1 | grep $port | wc -l) -eq 0 ]] ; then echo $port; break; fi; done;)",]
-
 
 seed: 42
 window_size: 5
@@ -35,9 +12,9 @@ goal_window_size: 5
 eval_window_size: 5
 
 batch_size: 16
-epochs: 600
+epochs: 5000
 eval_freq: 10
-eval_on_env_freq: 1
+eval_on_env_freq: 100
 num_env_evals: 100
 num_envs: 10
 num_final_evals: 100
@@ -47,7 +24,7 @@ precompute_embeddings: True
 
 goal_dim: 0
 wandb:
-  project: patch_policy
+  project: dynamo-repro
   entity: ${env_vars.wandb_entity}
 train_fraction: 0.9
 
@@ -75,14 +52,25 @@ dataset:
 data:
   window_size: ${window_size}
   action_window_size: ${action_window_size}
-  vqbet_get_future_action_chunk: false
+  vqbet_get_future_action_chunk: true
   goal_conditional: future
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
 
-save_every: 10
-save_path: "${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
+save_every: 1
+save_path: "${env_vars.save_path}/checkpoints/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}"
 load_path: null
+
+ckpt_base_path: ${env_vars.save_path}
+
+hydra:
+  run:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: True
+  sweep:
+    dir: ${ckpt_base_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
 
 model:
   _target_: models.vq_behavior_transformer.bet.BehaviorTransformer

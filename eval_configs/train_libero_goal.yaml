@@ -15,11 +15,11 @@ hydra:
   launcher:
     submitit_folder: ${hydra.sweep.dir}/.submitit/%j
     nodes: 1
-    tasks_per_node: 1
+    tasks_per_node: 8
     cpus_per_task: 16
     mem_gb: 1600
-    gres: "gpu:h100:1"
-    qos: "explore"
+    gres: "gpu:h200:8"
+    qos: "h200_jepa_high" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
     timeout_min: 5760
     setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
             export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
@@ -31,14 +31,16 @@ window_size: 10
 goal_window_size: 10
 eval_window_size: 10
 
-batch_size: 16
+batch_size: 64
 epochs: 50
 eval_freq: 10
 eval_on_env_freq: 1
-num_env_evals: 10
-num_final_evals: 10
-num_final_eval_per_goal: 10
+num_env_evals: 100
+num_envs: 10
+num_final_evals: 100
 action_window_size: 1
+
+precompute_embeddings: True
 
 wandb:
   project: patch_policy
@@ -86,7 +88,7 @@ model:
   act_dim: ${env.act_dim}
   goal_dim: ${encoder.output_dim}
   views: ${env.views}
-  n_patches: 256
+  n_patches: ${encoder.n_patches}
   vqvae_latent_dim: 512
   vqvae_n_embed: 16
   vqvae_groups: 2

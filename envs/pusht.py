@@ -621,6 +621,9 @@ class PushTEnv(gym.Env):
 
         # Run physics to take effect
         self.space.step(1.0 / self.sim_hz)
+    
+    def set_init_state(self, state):
+        self._set_state(state)
 
     def _set_state_local(self, state_local):
         agent_pos_local = state_local[:2]
@@ -1049,7 +1052,6 @@ class PushWrapper(gym.Wrapper):
         self.id = id
 
     def reset(self, goal_idx=None):
-        print("reset env!!!!!")
         obs = self.env.reset()
         self.step_idx = 0
         return_obs = self.env.render(mode="rgb_array")
@@ -1071,3 +1073,6 @@ class PushWrapper(gym.Wrapper):
         return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
 
         return return_obs, reward, done, info
+
+    def seed(self, seed=None):
+        return self.env.seed(seed=seed)
