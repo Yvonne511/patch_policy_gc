@@ -5,7 +5,7 @@ from transformers import AutoImageProcessor, Dinov2Model
 
 
 class WebSSLEncoder(nn.Module):
-    def __init__(self, name, feature_key, plus=False, output_dim=None, postprocess=None):
+    def __init__(self, name, feature_key, plus=False, output_dim=None, postprocess=None, n_patches=196):
         super().__init__()
         print("Encoder feature_key:", feature_key)
         self.name = name
@@ -67,5 +67,4 @@ class WebSSLEncoder(nn.Module):
 
         if self.latent_ndim == 1:
             emb = emb.unsqueeze(len(prefix_shape)) # dummy patch dim, b v 1 e
-        
         return emb

@@ -5,7 +5,7 @@ defaults:
   - encoder: dino_patch # dino_patch_avg_pool
   - _self_
   - override hydra/launcher: submitit_slurm
-  
+
 hydra:
   run:
     dir: ${env_vars.save_path}/outputs/${env.gym.id}/${now:%Y-%m-%d}/${now:%H-%M-%S}
@@ -33,11 +33,11 @@ window_size: 5
 goal_window_size: 5
 eval_window_size: 5
 
-batch_size: 32
+batch_size: 128
 epochs: 5000
 eval_freq: 10
 eval_on_env_freq: 10
-num_env_evals: 100 # 
+num_env_evals: 100 #
 num_final_evals: 100
 num_envs: 10
 action_window_size: 5

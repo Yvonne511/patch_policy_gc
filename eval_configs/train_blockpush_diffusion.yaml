@@ -21,7 +21,7 @@ hydra:
     cpus_per_task: 8
     mem_gb: 1600
     gres: "gpu:h200:8"
-    qos: "h200_core_shared" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
+    qos: "h200_jepa_high" # "h200_core_shared" # "h200_jepa_high" # "h200_dev"
     timeout_min: 5760
     setup: ["export DEBUGVAR=$(scontrol show hostnames $SLURM_JOB_NODELIST)",
             export MASTER_ADDR="$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)",
@@ -32,11 +32,11 @@ window_size: 3
 goal_window_size: 3
 eval_window_size: 3
 
-batch_size: 256 # TODO: reduce for patch features 
+batch_size: 256 # TODO: reduce for patch features
 epochs: 8000
 eval_freq: 40
-eval_on_env_freq: 400
-num_env_evals: 50 # 
+eval_on_env_freq: 100
+num_env_evals: 50 #
 num_envs: 10
 num_final_evals: 100
 action_window_size: 1
