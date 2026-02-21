@@ -5,7 +5,7 @@ from transformers import AutoModel
 
 
 class DinoV3Encoder(nn.Module):
-    def __init__(self, name, feature_key, plus=False, output_dim=None, postprocess=None, n_patches=256):
+    def __init__(self, name, feature_key, plus=False, output_dim=None, postprocess=None, n_patches=196):
         super().__init__()
         print("Encoder feature_key:", feature_key)
         self.name = name
@@ -48,7 +48,7 @@ class DinoV3Encoder(nn.Module):
         prod_prefix = 1
         for d in prefix_shape:
             prod_prefix *= d
-        
+
         x = x.reshape(prod_prefix, c, h, w)
 
         outputs = self.base_model(pixel_values=x)
@@ -56,7 +56,7 @@ class DinoV3Encoder(nn.Module):
             emb = outputs.last_hidden_state[:, 0, :]  # CLS token
         elif self.feature_key == "x_norm_patchtokens":
             emb = outputs.last_hidden_state[:, 5:, :]  # Patch tokens (skip 4 register tokens)
-        
+
         emb = emb.reshape(*prefix_shape, *emb.shape[1:])
 
         if self.postprocess == 'avg_pool':
@@ -64,5 +64,4 @@ class DinoV3Encoder(nn.Module):
 
         if self.latent_ndim == 1:
             emb = emb.unsqueeze(len(prefix_shape)) # dummy patch dim, b v 1 e
-
         return emb
