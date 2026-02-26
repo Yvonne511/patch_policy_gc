@@ -17,8 +17,8 @@ class VJEPA2Encoder(nn.Module):
             trust_remote_code=True,
             )
         self.processor = AutoVideoProcessor.from_pretrained(
-            repo, 
-            trust_remote_code=True, 
+            repo,
+            trust_remote_code=True,
             )
         self.feature_key = feature_key
         self.emb_dim = self.base_model.config.hidden_size
@@ -51,7 +51,7 @@ class VJEPA2Encoder(nn.Module):
             prod_prefix *= d
 
         x = x.reshape(prod_prefix, c, h, w)
-        inputs = self.processor(x, return_tensors="pt")["pixel_values_videos"]
+        inputs = self.processor(x, return_tensors="pt", do_rescale=False)["pixel_values_videos"]
         T = 2 # TODO: might have to change based on how many frames the model expects
         video_batch = einops.rearrange(inputs, "t b c h w -> b t c h w").repeat(1, T, 1, 1, 1)
         outputs = self.base_model.get_vision_features(video_batch)
