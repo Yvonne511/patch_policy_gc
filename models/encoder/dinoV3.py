@@ -2,7 +2,7 @@ import torch
 import einops
 import torch.nn as nn
 from transformers import AutoModel
-
+from torchvision import transforms
 
 class DinoV3Encoder(nn.Module):
     def __init__(self, name, feature_key, plus=False, output_dim=None, postprocess=None, n_patches=196):
@@ -37,10 +37,16 @@ class DinoV3Encoder(nn.Module):
             if postprocess == 'avg_pool':
                 self.latent_ndim = 1
 
+        self.normalization = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        # self.normalization = transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+
     def forward(self, x):
         # Accept arbitrary number of leading dimensions before (C, H, W)
         # and preserve them on return.
         # Example: input shape (...prefix, C, H, W)
+        assert x.max() <= 1.0 and x.min() >= 0, "expect 0..1 range"
+        x = self.normalization(x)
+
         prefix_shape = x.shape[:-3]
         c, h, w = x.shape[-3:]
 
