@@ -34,7 +34,7 @@ eval_window_size: 2
 batch_size: 16 # TODO: reduce for patch features
 epochs: 5000
 eval_freq: 10
-eval_on_env_freq: 20
+eval_on_env_freq: 10
 num_env_evals: 100 #
 num_final_evals: 100
 num_envs: 10

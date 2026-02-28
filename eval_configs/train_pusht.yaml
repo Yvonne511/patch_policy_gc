@@ -37,7 +37,7 @@ eval_window_size: 5
 batch_size: 8
 epochs: 600
 eval_freq: 10
-eval_on_env_freq: 10
+eval_on_env_freq: 1
 num_env_evals: 100
 num_envs: 10
 num_final_evals: 100
