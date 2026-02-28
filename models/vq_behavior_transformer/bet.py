@@ -66,7 +66,7 @@ class BehaviorTransformer(nn.Module):
         vqvae_latent_dim: int,
         vqvae_n_embed: int,
         vqvae_groups: int,
-        vqvae_fit_steps: int,
+        vqvae_fit_steps: Optional[int],
         vqvae_iters: int,
         n_patches: int,
         n_layer: int,
@@ -113,11 +113,11 @@ class BehaviorTransformer(nn.Module):
         self.vqvae_is_fit = False
         self._vqvae_model = VqVae(
             input_dim_h=act_window_size,
-            input_dim_w=act_dim, 
+            input_dim_w=act_dim,
             n_latent_dims=vqvae_latent_dim, # dim of input after encoder
             vqvae_n_embed=vqvae_n_embed, # num of codes in the codebook
             vqvae_groups=vqvae_groups, # num of codebooks
-            encoder_loss_multiplier=vqvae_encoder_loss_multiplier, 
+            encoder_loss_multiplier=vqvae_encoder_loss_multiplier,
             act_scale=act_scale,
         )
         self._vqvae_optim = torch.optim.Adam(
@@ -158,9 +158,15 @@ class BehaviorTransformer(nn.Module):
             result[:, i, :, :] = action_seq[:, i : i + act_w, :]
         return result
 
-    def _maybe_fit_vq(self):
-        if self.vqvae_is_fit or len(self._collected_actions) < self.vqvae_fit_steps:
+    def _maybe_fit_vq(self, force=False):
+        if self.vqvae_is_fit:
             return
+        if not force:
+            if self.vqvae_fit_steps is None:
+                return
+            if len(self._collected_actions) < self.vqvae_fit_steps:
+                return
+
         all_actions = torch.cat(self._collected_actions)
         all_actions = einops.rearrange(all_actions, "N T W A -> (N T) (W A)")
         # only train on unique actions
@@ -194,6 +200,10 @@ class BehaviorTransformer(nn.Module):
         self.vqvae_is_fit = True
         self._collected_actions = []
 
+    def finish_epoch(self):
+        if not self.vqvae_is_fit and self.vqvae_fit_steps is None:
+            self._maybe_fit_vq(force=True)
+
     def train(self, mode=True):
         # if vqvae is already trained, make sure we freeze it
         super().train(mode)
@@ -208,7 +218,7 @@ class BehaviorTransformer(nn.Module):
     ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Dict[str, float]]:
         if (
             (action_seq is not None)
-            and (len(self._collected_actions) < self.vqvae_fit_steps)
+            and (not self.vqvae_is_fit)
             and (self.training)
         ):
             action_seq_all = accelerator.gather(action_seq)
@@ -220,6 +230,8 @@ class BehaviorTransformer(nn.Module):
         if self._cbet_method == "unconditional":
             gpt_input = obs_seq
         elif self._cbet_method == "stack":
+            if goal_seq.shape[1] < self._obs_window_size:
+                goal_seq = repeat_start_to_length(goal_seq, self._obs_window_size, dim=1)
             gpt_input = torch.cat([goal_seq, obs_seq], dim=-1)
         else:
             raise NotImplementedError
