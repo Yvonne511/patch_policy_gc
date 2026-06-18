@@ -187,10 +187,10 @@ def main(cfg):
     train_data = TrajectorySlicerDataset(train_data, **traj_slicer_kwargs)
     test_data = TrajectorySlicerDataset(test_data, **traj_slicer_kwargs)
     train_loader = torch.utils.data.DataLoader(
-        train_data, batch_size=cfg.gpu_batch_size, shuffle=True, pin_memory=False
+        train_data, batch_size=cfg.gpu_batch_size, shuffle=True, pin_memory=False, num_workers=cfg.get("num_workers", 0)
     )
     test_loader = torch.utils.data.DataLoader(
-        test_data, batch_size=cfg.gpu_batch_size, shuffle=False, pin_memory=False
+        test_data, batch_size=cfg.gpu_batch_size, shuffle=False, pin_memory=False, num_workers=cfg.get("num_workers", 0)
     )
     log.info(f"dataloader batch size: {cfg.gpu_batch_size}")
 

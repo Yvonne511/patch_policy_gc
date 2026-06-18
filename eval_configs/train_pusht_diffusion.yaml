@@ -32,6 +32,7 @@ seed: 42
 window_size: 2
 goal_window_size: 2
 eval_window_size: 2
+num_workers: 0
 
 batch_size: 256 # TODO: reduce for patch features
 epochs: 2000
@@ -42,7 +43,7 @@ num_envs: 10
 num_final_evals: 100
 action_window_size: 5
 
-pred_horizon: ${action_window_size} # Total seq length to predict to roll out
+pred_horizon: ${eval:'${action_window_size} + ${window_size} - 1'}
 n_action_steps: ${action_window_size} # Action steps to roll out
 
 precompute_embeddings: True
@@ -89,7 +90,7 @@ dataset:
 data:
   window_size: ${window_size}
   action_window_size: ${action_window_size}
-  vqbet_get_future_action_chunk: true
+  vqbet_get_future_action_chunk: false
   goal_conditional: none
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
@@ -107,6 +108,9 @@ model:
   obs_horizon: ${window_size}
   pred_horizon: ${pred_horizon}
   action_horizon: ${n_action_steps}
+  n_layer: 8
+  n_head: 4
+  n_embd: 256
   visual_input: true
   data_act_scale: 1
   lr: ${optim.lr}
