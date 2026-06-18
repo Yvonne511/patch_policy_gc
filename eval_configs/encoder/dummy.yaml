@@ -1,0 +1,3 @@
+_target_: models.encoder.dummy.DummyEncoder
+output_dim: 5  # 5 = [ax ay bx by angle], 6 with use_sin_cos, +2 per with_velocity
+n_patches: 1

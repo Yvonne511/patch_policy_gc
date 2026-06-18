@@ -1,5 +1,5 @@
-save_path: /home_shared/grail_jeff/patch_policy  # e.g. root directory of this repo
-wandb_entity: jeffacce # e.g. your wandb username
+save_path: /vast/yw4142/checkpoints/reasoning_bc  # e.g. root directory of this repo
+wandb_entity: yw511511 # e.g. your wandb username
 
 
 dataset_root: /nas/kathy/datasets/dynamo_repro_datasets  # e.g. set this to the unzipped directory of all datasets

@@ -369,9 +369,11 @@ class PushTEnv(gym.Env):
         legacy=False,
         block_cog=None,
         damping=None,
-        render_action=True,
+        render_action=False,
         render_size=224,
         reset_to_state=None,
+        use_sin_cos=False,
+        with_velocity=False,
     ):
         self._seed = None
         self.seed()
@@ -383,6 +385,8 @@ class PushTEnv(gym.Env):
         self.control_hz = self.metadata["video.frames_per_second"]
         # legcay set_state for data compatibility
         self.legacy = legacy
+        self.use_sin_cos = use_sin_cos
+        self.with_velocity = with_velocity
 
         # agent_pos, block_pos, block_angle
         self.observation_space = spaces.Box(
@@ -502,11 +506,13 @@ class PushTEnv(gym.Env):
         return TeleopAgent(act)
 
     def _get_obs(self):
-        obs = np.array(
-            tuple(self.agent.position)
-            + tuple(self.block.position)
-            + (self.block.angle % (2 * np.pi),)
-        )
+        if self.use_sin_cos:
+            angle_repr = (np.sin(self.block.angle), np.cos(self.block.angle))
+        else:
+            angle_repr = (self.block.angle % (2 * np.pi),)
+        obs = np.array(tuple(self.agent.position) + tuple(self.block.position) + angle_repr)
+        if self.with_velocity:
+            obs = np.concatenate([obs, np.array(self.agent.velocity)])
         return obs
 
     def _get_goal_pose_body(self, pose):
@@ -623,7 +629,14 @@ class PushTEnv(gym.Env):
         self.space.step(1.0 / self.sim_hz)
     
     def set_init_state(self, state):
-        self._set_state(state)
+        if isinstance(state, np.ndarray):
+            state = state.tolist()
+        if self.use_sin_cos:
+            raw_angle = np.arctan2(state[4], state[5])
+            base_state = state[:4] + [raw_angle]
+        else:
+            base_state = state[:5]
+        self._set_state(base_state)
 
     def _set_state_local(self, state_local):
         agent_pos_local = state_local[:2]
@@ -742,112 +755,6 @@ class PushTEnv(gym.Env):
         body.friction = 1
         self.space.add(body, shape1, shape2)
         return body
-
-
-class PymunkKeypointManager:
-    def __init__(
-        self,
-        local_keypoint_map: Dict[str, np.ndarray],
-        color_map: Optional[Dict[str, np.ndarray]] = None,
-    ):
-        """
-        local_keypoint_map:
-            "<attribute_name>": (N,2) floats in object local coordinate
-        """
-        if color_map is None:
-            cmap = cm.get_cmap("tab10")
-            color_map = dict()
-            for i, key in enumerate(local_keypoint_map.keys()):
-                color_map[key] = (np.array(cmap.colors[i]) * 255).astype(np.uint8)
-
-        self.local_keypoint_map = local_keypoint_map
-        self.color_map = color_map
-
-    @property
-    def kwargs(self):
-        return {
-            "local_keypoint_map": self.local_keypoint_map,
-            "color_map": self.color_map,
-        }
-
-    @classmethod
-    def create_from_pusht_env(cls, env, n_block_kps=9, n_agent_kps=3, seed=0, **kwargs):
-        rng = np.random.default_rng(seed=seed)
-        local_keypoint_map = dict()
-        for name in ["block", "agent"]:
-            self = env
-            self.space = pymunk.Space()
-            if name == "agent":
-                self.agent = obj = self.add_circle((256, 400), 15)
-                n_kps = n_agent_kps
-            else:
-                self.block = obj = self.add_tee((256, 300), 0)
-                n_kps = n_block_kps
-
-            self.screen = pygame.Surface((512, 512))
-            self.screen.fill(pygame.Color("white"))
-            draw_options = DrawOptions(self.screen)
-            self.space.debug_draw(draw_options)
-            # pygame.display.flip()
-            img = np.uint8(pygame.surfarray.array3d(self.screen).transpose(1, 0, 2))
-            obj_mask = (img != np.array([255, 255, 255], dtype=np.uint8)).any(axis=-1)
-
-            tf_img_obj = cls.get_tf_img_obj(obj)
-            xy_img = np.moveaxis(np.array(np.indices((512, 512))), 0, -1)[:, :, ::-1]
-            local_coord_img = tf_img_obj.inverse(xy_img.reshape(-1, 2)).reshape(
-                xy_img.shape
-            )
-            obj_local_coords = local_coord_img[obj_mask]
-
-            # furthest point sampling
-            init_idx = rng.choice(len(obj_local_coords))
-            obj_local_kps = farthest_point_sampling(obj_local_coords, n_kps, init_idx)
-            small_shift = rng.uniform(0, 1, size=obj_local_kps.shape)
-            obj_local_kps += small_shift
-
-            local_keypoint_map[name] = obj_local_kps
-
-        return cls(local_keypoint_map=local_keypoint_map, **kwargs)
-
-    @staticmethod
-    def get_tf_img(pose: Sequence):
-        pos = pose[:2]
-        rot = pose[2]
-        tf_img_obj = st.AffineTransform(translation=pos, rotation=rot)
-        return tf_img_obj
-
-    @classmethod
-    def get_tf_img_obj(cls, obj: pymunk.Body):
-        pose = tuple(obj.position) + (obj.angle,)
-        return cls.get_tf_img(pose)
-
-    def get_keypoints_global(
-        self, pose_map: Dict[set, Union[Sequence, pymunk.Body]], is_obj=False
-    ):
-        kp_map = dict()
-        for key, value in pose_map.items():
-            if is_obj:
-                tf_img_obj = self.get_tf_img_obj(value)
-            else:
-                tf_img_obj = self.get_tf_img(value)
-            kp_local = self.local_keypoint_map[key]
-            kp_global = tf_img_obj(kp_local)
-            kp_map[key] = kp_global
-        return kp_map
-
-    def draw_keypoints(self, img, kps_map, radius=1):
-        scale = np.array(img.shape[:2]) / np.array([512, 512])
-        for key, value in kps_map.items():
-            color = self.color_map[key].tolist()
-            coords = (value * scale).astype(np.int32)
-            for coord in coords:
-                cv2.circle(img, coord, radius=radius, color=color, thickness=-1)
-        return img
-
-    def draw_keypoints_pose(self, img, pose_map, is_obj=False, **kwargs):
-        kp_map = self.get_keypoints_global(pose_map, is_obj=is_obj)
-        return self.draw_keypoints(img, kps_map=kp_map, **kwargs)
-
 
 class PushTKeypointsEnv(PushTEnv):
     def __init__(
@@ -1046,16 +953,20 @@ class Normalizer:
 
 
 class PushWrapper(gym.Wrapper):
-    def __init__(self, env, id):
+    def __init__(self, env, id, state_based=False, with_velocity=False, use_sin_cos=False):
         super(PushWrapper, self).__init__(env)
         self.env = env
         self.id = id
+        self.state_based = state_based
 
     def reset(self, goal_idx=None):
         obs = self.env.reset()
         self.step_idx = 0
-        return_obs = self.env.render(mode="rgb_array")
-        return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
+        if self.state_based:
+            return_obs = obs[None, :]  # 1 state_dim
+        else:
+            return_obs = self.env.render(mode="rgb_array")
+            return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
         return return_obs
 
     def step(self, action):
@@ -1069,9 +980,11 @@ class PushWrapper(gym.Wrapper):
         self.step_idx += 1
         info["max_coverage"] = max(self.coverage_arr)
         info["final_coverage"] = self.coverage_arr[-1]
-        return_obs = info["image"]
-        return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
-
+        if self.state_based:
+            return_obs = obs[None, :]  # 1 state_dim
+        else:
+            return_obs = info["image"]
+            return_obs = einops.rearrange(return_obs, "H W C -> 1 C H W") / 255.0  # 1 view
         return return_obs, reward, done, info
 
     def seed(self, seed=None):

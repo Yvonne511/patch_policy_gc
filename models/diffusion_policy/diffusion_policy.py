@@ -825,6 +825,11 @@ class DiffusionPolicy(nn.Module):
             pad_tokens = obs_seq[:, 0:1].repeat(1, missing_time, 1, 1)
             obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
 
+        if getattr(self, "obs_normalizer", None) is not None:
+            obs_seq = self.normalize_obs(obs_seq)
+            if self.cond_method == "stack":
+                goal_seq = self.normalize_obs(goal_seq)
+
         # handle goal stacking here
         if self.cond_method == "unconditional":
             cond = obs_seq
@@ -860,6 +865,12 @@ class DiffusionPolicy(nn.Module):
     def unnormalize_data(self, data):
         return self.normalizer.unnormalize(data)
 
+    def normalize_obs(self, obs):
+        return self.obs_normalizer.normalize(obs)
+
+    def unnormalize_obs(self, obs):
+        return self.obs_normalizer.unnormalize(obs)
+
     def _predict(
         self,
         obs_seq: torch.Tensor,
@@ -884,6 +895,11 @@ class DiffusionPolicy(nn.Module):
             missing_time = self.obs_horizon - T_obs
             pad_tokens = obs_seq[:, 0:1].repeat(1, missing_time, 1, 1)
             obs_seq = torch.cat([pad_tokens, obs_seq], dim=1)
+        
+        if getattr(self, "obs_normalizer", None) is not None:
+            obs_seq = self.normalize_obs(obs_seq)
+            if self.cond_method == "stack":
+                goal_seq = self.normalize_obs(goal_seq)
 
         # handle goal stacking here
         if self.cond_method == "unconditional":
@@ -932,6 +948,9 @@ class DiffusionPolicy(nn.Module):
 
     def set_normalizer(self, normalizer):
         self.normalizer = normalizer
+
+    def set_obs_normalizer(self, normalizer):
+        self.obs_normalizer = normalizer
 
     def train(self, mode=True):
         super().train(mode)

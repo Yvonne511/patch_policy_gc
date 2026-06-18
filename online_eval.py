@@ -107,7 +107,7 @@ def main(cfg):
     video = VideoRecorder(dir_name=save_path)
 
     # init datasets
-    dataset = hydra.utils.instantiate(cfg.dataset)
+    dataset, _ = hydra.utils.instantiate(cfg.dataset)
     encoder = hydra.utils.instantiate(cfg.encoder)
     # encoder = encoder.to(cfg.device).eval()
     encoder = accelerator.prepare(encoder)
@@ -128,6 +128,11 @@ def main(cfg):
         action_normalizer = LinearNormalizer()
         action_normalizer.fit(actions)
         cbet_model.set_normalizer(action_normalizer)
+
+        obs_normalizer = LinearNormalizer()
+        if cfg.get("state_based", False):
+            obs_normalizer.fit(dataset.get_all_states())
+            cbet_model.set_obs_normalizer(obs_normalizer)
 
     if cfg.load_path: # TODO: not checked for diffusion
         print(f"Loading model from {cfg.load_path} ...")
@@ -152,12 +157,13 @@ def main(cfg):
     video = VideoRecorder(dir_name=save_path)
 
     # init datasets
-    dataset = hydra.utils.instantiate(cfg.dataset)
-    train_data, test_data = split_traj_datasets(
-        dataset,
-        train_fraction=cfg.train_fraction,
-        random_seed=cfg.seed,
-    )
+    # dataset = hydra.utils.instantiate(cfg.dataset)
+    # train_data, test_data = split_traj_datasets(
+    #     dataset,
+    #     train_fraction=cfg.train_fraction,
+    #     random_seed=cfg.seed,
+    # )
+    train_data, test_data = hydra.utils.instantiate(cfg.dataset)
     use_libero_goal = cfg.data.get("use_libero_goal", False)
 
     precompute_embeddings = cfg.get("precompute_embeddings", True)
@@ -205,7 +211,32 @@ def main(cfg):
                 assert embd.ndim == 3, "expect V P E here"
                 embd = einops.rearrange(embd, "V P E -> (V P) E") # don't flatten patch dim
                 goals_cache.append(embd)
-
+        def goal_fn(goal_idx):
+            return goals_cache[goal_idx]
+    elif "use_pusht_goal" in cfg.data:
+        with torch.no_grad():
+            goals_cache = []
+            for i in range(10):
+                idx = i * 10
+                last_obs, _, _ = dataset.get_frames(idx, [-1])  # 1 V C H W
+                last_obs = last_obs.to(cfg.device)
+                embd = encoder(last_obs)[0]  # V P E
+                assert embd.ndim == 3, "expect V P E here"
+                embd = einops.rearrange(embd, "V P E -> (V P) E") # don't flatten patch dim
+                goals_cache.append(embd)
+        def goal_fn(goal_idx):
+            return goals_cache[goal_idx]
+    elif "use_blockpush_goal" in cfg.data:
+        with torch.no_grad():
+            goals_cache = []
+            for i in range(10):
+                idx = i * 50
+                last_obs, _, _ = dataset.get_frames(idx, [-1])  # 1 V C H W
+                last_obs = last_obs.to(cfg.device)
+                embd = encoder(last_obs)[0]  # V P E
+                assert embd.ndim == 3, "expect V P E here"
+                embd = einops.rearrange(embd, "V P E -> (V P) E") # don't flatten patch dim
+                goals_cache.append(embd)
         def goal_fn(goal_idx):
             return goals_cache[goal_idx]
     else:
@@ -240,9 +271,10 @@ def main(cfg):
             obs_stack = deque(maxlen=cfg.eval_window_size)
             this_obs = env.reset(goal_idx=goal_idx)  # N V C H W
             print(f"Eval on goal {goal_idx}/{num_batches}, {cfg.num_envs} episodes")
-            assert (
-                this_obs.min() >= 0 and this_obs.max() <= 1
-            ), "expect 0-1 range observation"
+            if not cfg.get("state_based", False):
+                assert (
+                    this_obs.min() >= 0 and this_obs.max() <= 1
+                ), "expect 0-1 range observation"
             this_obs_enc = embed(encoder, this_obs)  # N (V P) E. from now on V is folded into P
             obs_stack.append(this_obs_enc)
             done, total_reward = np.array([False]), 0

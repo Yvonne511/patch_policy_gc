@@ -2,7 +2,7 @@ defaults:
   - env_vars: env_vars
   # - encoder: pusht_dynamo
   # - encoder: dino_cls
-  - encoder: dino_patch # dino_patch_avg_pool
+  - encoder: dino_patch_avg_pool # dino_patch_avg_pool
   - _self_
   - override hydra/launcher: submitit_slurm
 
@@ -50,7 +50,7 @@ goal_dim: 0
 train_fraction: 0.9
 
 wandb:
-  project: patch_policy
+  project: reasoning_bc
   entity: ${env_vars.wandb_entity}
 
 device: cuda
@@ -69,15 +69,17 @@ env:
   views: 2
 
 dataset:
-  _target_: datasets.block_pushing.PushMultiviewTrajectoryDataset
+  _target_: datasets.block_pushing.load_blockpush_train_val_split
   data_directory: ${env_vars.datasets.block_push}
   view_idx: null
+  train_fraction: ${train_fraction}
+  random_seed: ${seed}
 
 data:
   window_size: ${window_size}
   action_window_size: ${action_window_size}
   vqbet_get_future_action_chunk: true
-  goal_conditional: future
+  goal_conditional: none
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
 

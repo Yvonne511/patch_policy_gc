@@ -2,7 +2,7 @@ defaults:
   - env_vars: env_vars
   # - encoder: pusht_dynamo
   # - encoder: dino_cls
-  - encoder: dino_patch # dino_patch_avg_pool
+  - encoder: dino_patch_avg_pool # dino_patch_avg_pool, dummy
   - _self_
   - override hydra/launcher: submitit_slurm
 
@@ -46,10 +46,11 @@ pred_horizon: ${action_window_size} # Total seq length to predict to roll out
 n_action_steps: ${action_window_size} # Action steps to roll out
 
 precompute_embeddings: True
+state_based: False
 
 goal_dim: 0
 wandb:
-  project: patch_policy
+  project: reasoning_bc
   entity: ${env_vars.wandb_entity}
 train_fraction: 0.9
 
@@ -60,25 +61,36 @@ optim:
   betas: [0.9, 0.999]
 
 env:
+  state_based: ${state_based}
+  with_velocity: False
+  use_sin_cos: False
   gym:
     _target_: envs.pusht.PushWrapper
     id: pusht
+    state_based: ${state_based}
+    with_velocity: ${env.with_velocity}
+    use_sin_cos: ${env.use_sin_cos}
     env:
-      _target_: envs.pusht.PushTKeypointsEnv
+      _target_: envs.pusht.PushTEnv
+      use_sin_cos: ${env.use_sin_cos}
+      with_velocity: ${env.with_velocity}
   obs_dim: 20
   act_dim: 2
   goal_dim: ${goal_dim}
   views: 1
 
 dataset:
-  _target_: datasets.pusht.PushTDataset
+  _target_: datasets.pusht.load_pusht_train_val_split
   data_directory: ${env_vars.datasets.pusht}
+  state_based: ${state_based}
+  with_velocity: ${env.with_velocity}
+  use_sin_cos: ${env.use_sin_cos}
 
 data:
   window_size: ${window_size}
   action_window_size: ${action_window_size}
   vqbet_get_future_action_chunk: true
-  goal_conditional: future
+  goal_conditional: none
   future_seq_len: ${goal_window_size}
   min_future_sep: ${action_window_size}
 

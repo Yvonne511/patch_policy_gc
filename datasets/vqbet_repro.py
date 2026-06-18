@@ -85,7 +85,7 @@ class TrajectorySlicerDataset(TrajectoryDataset):
         
         # import pdb; pdb.set_trace()
 
-    def get_seq_length(self, idx: int) -> int:
+    def get_seq_length(self, idx: int) -> int: #TODO: bug fix for future_conditional case
         if self.future_conditional:
             return self.future_seq_len + self.window
         else:
@@ -131,7 +131,18 @@ class TrajectorySlicerDataset(TrajectoryDataset):
                 raise ValueError(
                     f"Action chunk too short: {act.shape[0]} < {expected_len}, but pad_seq_length is False"
                 )
-        values = [obs_win, act, *repeated_others]
+        if self.future_conditional:
+            lo = end + self.min_future_sep
+            if self.only_sample_tail or lo >= T:
+                future_start = np.random.randint(T - self.future_seq_len, T)
+            else:
+                future_start = np.random.randint(lo, T)
+            goal = utils.inference.repeat_end_to_length(
+                obs[future_start : min(future_start + self.future_seq_len, T)], self.future_seq_len, dim=0
+            )
+            values = [obs_win, act, goal]
+        else:
+            values = [obs_win, act, *repeated_others]
 
         # optionally apply transform
         if self.transform is not None:

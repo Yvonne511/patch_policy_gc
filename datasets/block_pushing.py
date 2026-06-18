@@ -4,7 +4,7 @@ import einops
 import numpy as np
 from pathlib import Path
 from typing import Optional
-from datasets.core import TrajectoryDataset
+from datasets.core import TrajectoryDataset, split_traj_datasets
 
 
 class PushMultiviewTrajectoryDataset(TrajectoryDataset):
@@ -87,3 +87,11 @@ class PushMultiviewTrajectoryDataset(TrajectoryDataset):
 
     def __len__(self):
         return len(self.states)
+
+def load_blockpush_train_val_split(data_directory, view_idx=None, train_fraction=0.9, random_seed=42):
+    blockpush_dataset = PushMultiviewTrajectoryDataset(
+        data_directory=data_directory,
+        view_idx=view_idx,
+    )
+    train_dataset, val_dataset = split_traj_datasets(blockpush_dataset, train_fraction=train_fraction, random_seed=random_seed)
+    return train_dataset, val_dataset
