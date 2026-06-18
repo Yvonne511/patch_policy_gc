@@ -32,12 +32,31 @@ logger = logging.getLogger(__name__)
 if "MUJOCO_GL" not in os.environ:
     os.environ["MUJOCO_GL"] = "egl"
 
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+
 
 def seed_everything(random_seed: int):
     np.random.seed(random_seed)
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed_all(random_seed)
     random.seed(random_seed)
+
+
+def count_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
+
+
+def format_params(num_params):
+    if num_params >= 1e9:
+        return f"{num_params / 1e9:.2f}B"
+    elif num_params >= 1e6:
+        return f"{num_params / 1e6:.2f}M"
+    elif num_params >= 1e3:
+        return f"{num_params / 1e3:.2f}K"
+    else:
+        return str(num_params)
 
 
 @hydra.main(config_path="eval_configs", version_base="1.2")
